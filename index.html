@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#083a73">
+<link rel="manifest" href="manifest.webmanifest">
+<title>ORD Caisson Drawing</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#eef2f6;color:#15202b}
+*{box-sizing:border-box}body{margin:0}
+header{background:#083a73;color:white;padding:calc(12px + env(safe-area-inset-top)) 14px 12px;position:sticky;top:0;z-index:20}
+header h1{font-size:20px;margin:0} header p{font-size:12px;margin:4px 0 0;opacity:.86}
+.toolbar{display:grid;grid-template-columns:1fr auto auto;gap:8px;margin-top:10px}
+input,select,textarea,button{font:inherit}
+input,select,textarea{width:100%;border:1px solid #c8d0d9;border-radius:10px;padding:10px;background:white}
+button{border:0;border-radius:10px;padding:10px 13px;font-weight:750;background:#0b67c2;color:white}
+button.secondary{background:#e6edf5;color:#16202a}.layout{display:grid;grid-template-columns:minmax(0,1fr) 350px;height:calc(100vh - 115px)}
+.map-shell{overflow:auto;background:#66717c;position:relative;-webkit-overflow-scrolling:touch}
+.map{position:relative;width:1800px;line-height:0;background:white}
+.map img{display:block;width:100%;height:auto}
+.pin{position:absolute;width:19px;height:19px;transform:translate(-50%,-50%);border-radius:50%;border:2px solid white;background:#737d87;box-shadow:0 1px 4px #0008;cursor:pointer;line-height:15px;text-align:center;font-size:7px;font-weight:800;color:white}
+.pin.known{background:#16803d}.pin.issue{background:#c32727}.pin.selected{width:30px;height:30px;background:#ff9f0a;z-index:5;font-size:10px;line-height:26px}
+.panel{background:white;border-left:1px solid #cbd3dc;padding:14px;overflow:auto}
+.card{border:1px solid #d7dee7;border-radius:14px;padding:12px;margin-bottom:12px}
+.card h2{margin:0 0 8px;font-size:20px}.label{font-size:12px;color:#66717c;margin-top:9px}.value{font-weight:700;word-break:break-word}
+.badge{display:inline-block;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:800;background:#eceff3}.badge.green{background:#dff4e5;color:#12642f}.badge.gray{color:#53606d}
+.photo-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}.photo-grid img{width:100%;height:110px;object-fit:cover;border-radius:8px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.tiny{font-size:12px;color:#6b7580}
+.legend{position:fixed;left:12px;bottom:12px;z-index:8;background:#fffe;padding:8px 10px;border-radius:10px;font-size:11px;box-shadow:0 2px 10px #0003}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px}
+.empty{text-align:center;color:#6d7883;padding:28px 8px}
+@media(max-width:760px){
+ header{position:relative}.toolbar{grid-template-columns:1fr auto}.toolbar button:last-child{display:none}
+ .layout{display:block;height:auto}.map-shell{height:58vh}.map{width:1500px}.panel{border-left:0;border-top:1px solid #ccd4dd;min-height:42vh}
+ .legend{bottom:44vh}
+}
+</style>
+</head>
+<body>
+<header>
+<h1>ORD Caisson Drawing</h1>
+<p>Tap a numbered caisson to open its GPS, status, notes, and photos.</p>
+<div class="toolbar">
+<input id="search" type="number" inputmode="numeric" placeholder="Jump to caisson number">
+<button id="jump">Find</button>
+<button id="export" class="secondary">Export Data</button>
+</div>
+</header>
+<div class="layout">
+<section class="map-shell" id="mapShell">
+<div class="map" id="map"><img src="assets/caisson-plan.png" alt="Caisson Number Plan"><div id="pins"></div></div>
+</section>
+<aside class="panel" id="panel"><div class="empty">Tap a caisson number on the drawing or search above.</div></aside>
+</div>
+<div class="legend"><span class="dot" style="background:#16803d"></span>Known GPS &nbsp; <span class="dot" style="background:#737d87"></span>No data &nbsp; <span class="dot" style="background:#ff9f0a"></span>Selected</div>
+
+<script>
+const HOTSPOTS=[{"caisson":57,"x":23.13188858974127,"y":55.29193348354764},{"caisson":60,"x":35.31244536976755,"y":12.361376373856157},{"caisson":61,"x":37.766148131570695,"y":12.33359972635905},{"caisson":62,"x":31.44207471682702,"y":17.30582449171278},{"caisson":63,"x":36.77077823215061,"y":17.284992006089954},{"caisson":64,"x":42.12726074972271,"y":17.284992006089954},{"caisson":65,"x":46.19207499939718,"y":17.25720829433865},{"caisson":66,"x":48.18281479823737,"y":14.153047844215674},{"caisson":67,"x":49.312445558147665,"y":11.305821383440936},{"caisson":68,"x":52.30781649365838,"y":10.611376938996491},{"caisson":69,"x":55.617998853141884,"y":9.798881742689344},{"caisson":70,"x":58.969850893373845,"y":8.91693079913104},{"caisson":71,"x":31.428186393078462,"y":22.50721366317184},{"caisson":72,"x":36.79855487964772,"y":22.40998833267777},{"caisson":73,"x":42.13189019097222,"y":22.40998833267777},{"caisson":74,"x":47.4559642650463,"y":22.48638117754901},{"caisson":75,"x":31.428186393078462,"y":26.56971083747016},{"caisson":76,"x":36.79855487964772,"y":26.555822513721605},{"caisson":77,"x":42.145778514720774,"y":26.555822513721605},{"caisson":78,"x":47.442075941297745,"y":26.562766675595885},{"caisson":79,"x":31.409666273328995,"y":31.215545866224502},{"caisson":80,"x":36.77077823215061,"y":31.25721083747016},{"caisson":81,"x":42.11800186722367,"y":31.208601704350226},{"caisson":82,"x":47.442075941297745,"y":31.236378351847332},{"caisson":83,"x":31.44207471682702,"y":35.94471083747016},{"caisson":84,"x":36.79855487964772,"y":35.916934189973055},{"caisson":85,"x":39.46059309406045,"y":35.8752692187274},{"caisson":86,"x":42.11337242597415,"y":35.93776667559588},{"caisson":87,"x":44.90503852750049,"y":35.8752692187274},{"caisson":88,"x":49.26151699490017,"y":35.923878351847335},{"caisson":89,"x":31.395777949580438,"y":40.00026384989421},{"caisson":90,"x":34.09948231261454,"y":40.00026384989421},{"caisson":91,"x":36.80781493952245,"y":40.02110339977123},{"caisson":92,"x":40.03003909264082,"y":39.9724872023971},{"caisson":93,"x":44.826333316755886,"y":39.95165471677427},{"caisson":94,"x":47.205965018566744,"y":38.61831912287959},{"caisson":95,"x":50.914298163519966,"y":38.56970998975966},{"caisson":96,"x":35.451333316755886,"y":42.57665386906377},{"caisson":97,"x":49.29392779314959,"y":40.937768088446724},{"caisson":98,"x":50.377259431061916,"y":40.90998790882252},{"caisson":99,"x":49.26151699490017,"y":43.29887849313241},{"caisson":100,"x":50.36681375385802,"y":43.29887849313241},{"caisson":101,"x":31.454778600622106,"y":45.22943320097747},{"caisson":102,"x":34.121445078908664,"y":45.22943320097747},{"caisson":103,"x":36.77885267469618,"y":45.250265686600294},{"caisson":104,"x":42.05663233627508,"y":45.264154010348854},{"caisson":105,"x":43.66774146939502,"y":45.562767099451136},{"caisson":106,"x":42.042741657775125,"y":48.31971239160608},{"caisson":107,"x":46.112187703450516,"y":49.28498974552861},{"caisson":108,"x":42.05663233627508,"y":52.159989321673365},{"caisson":109,"x":43.53811005015432,"y":54.33360029149939},{"caisson":110,"x":52.71866880817178,"y":14.389156412195275},{"caisson":111,"x":56.06125961115331,"y":13.458603399771233},{"caisson":112,"x":59.274221349645536,"y":12.048874961005316},{"caisson":113,"x":52.98255637839988,"y":17.35443362483272},{"caisson":114,"x":56.41311127462505,"y":17.30582449171278},{"caisson":115,"x":59.69088990011333,"y":15.889158955326788},{"caisson":116,"x":53.32051971812307,"y":20.45165697733561},{"caisson":117,"x":55.6399639741874,"y":20.264157542475946},{"caisson":118,"x":56.86218591383946,"y":20.007209424619322},{"caisson":119,"x":52.797369309413575,"y":22.416932494552047},{"caisson":120,"x":53.741815355088974,"y":24.229436450534397},{"caisson":121,"x":55.72329862618152,"y":23.71554727907534},{"caisson":122,"x":57.311258198302475,"y":23.278043888233327},{"caisson":123,"x":52.76959266191648,"y":26.493325056853116},{"caisson":124,"x":54.12607546205874,"y":27.611377504136826},{"caisson":125,"x":56.075150289653266,"y":27.055823361432115},{"caisson":126,"x":57.66310986177421,"y":26.63220829433865},{"caisson":127,"x":52.797369309413575,"y":31.236378351847332},{"caisson":128,"x":54.57515010127315,"y":31.722490875809278},{"caisson":129,"x":56.505702454366805,"y":31.236378351847332},{"caisson":130,"x":54.89922276249638,"y":34.354434189973055},{"caisson":131,"x":52.82051887041257,"y":35.9030458662245},{"caisson":132,"x":55.21403654122058,"y":37.06971451088234},{"caisson":133,"x":57.139964162567516,"y":36.61832279629177},{"caisson":134,"x":59.5797786006221,"y":35.29193136427138},{"caisson":135,"x":52.76959266191648,"y":39.81276441503454},{"caisson":136,"x":55.644593415436916,"y":41.43082124215585},{"caisson":137,"x":57.565889240782944,"y":41.00026554531521},{"caisson":138,"x":48.186259799533424,"y":44.96554445337366},{"caisson":139,"x":50.876075838818956,"y":45.18082053573043},{"caisson":140,"x":52.801998750663095,"y":45.132211402610494},{"caisson":141,"x":49.26033490969811,"y":46.34748918038827},{"caisson":142,"x":50.62144479633849,"y":46.79887736285174},{"caisson":143,"x":56.25570320788725,"y":46.87526667559588},{"caisson":144,"x":58.19088971173322,"y":46.444710978755246},{"caisson":145,"x":49.940891030394,"y":48.416934189973055},{"caisson":146,"x":52.78811042691455,"y":48.35443320097747},{"caisson":147,"x":56.63533387360749,"y":50.38915386906376},{"caisson":148,"x":58.56125914020303,"y":49.86137637385615},{"caisson":149,"x":49.473298626181524,"y":54.243322655006686},{"caisson":150,"x":56.681630640854074,"y":54.31971196775083},{"caisson":151,"x":58.96403936692226,"y":53.34054275795266},{"caisson":152,"x":57.20940813606168,"y":55.86832011187518},{"caisson":153,"x":61.50107442596813,"y":8.291935037683558},{"caisson":154,"x":61.83903776569131,"y":11.396102552060727},{"caisson":155,"x":62.22792731391059,"y":14.778044047179046},{"caisson":156,"x":60.4177404333044,"y":17.396098596078378},{"caisson":157,"x":64.58903654122058,"y":17.347489462958443},{"caisson":158,"x":68.77422097288533,"y":17.31276865358706},{"caisson":159,"x":74.12144460795838,"y":17.31276865358706},{"caisson":160,"x":79.47329768428096,"y":17.31276865358706},{"caisson":161,"x":82.46866391028887,"y":15.326653586493599},{"caisson":162,"x":85.12607621557919,"y":15.291932777122216},{"caisson":163,"x":84.80663064085408,"y":17.278047844215674},{"caisson":164,"x":88.63533396779755,"y":8.590548126785844},{"caisson":165,"x":90.60755129213686,"y":6.486375464333428},{"caisson":166,"x":91.37144206482687,"y":5.090542413570263},{"caisson":167,"x":94.28811249909577,"y":4.875266331213492},{"caisson":168,"x":93.93625612612124,"y":5.687768591774835},{"caisson":169,"x":91.3019957365813,"y":8.653045583654333},{"caisson":170,"x":87.45477464463976,"y":19.166930516560875},{"caisson":171,"x":60.68625979953342,"y":19.923879482128},{"caisson":172,"x":62.73718468936873,"y":19.396101986920392},{"caisson":173,"x":60.94552028326341,"y":22.493325339423286},{"caisson":174,"x":63.12144479633849,"y":23.215546431364835},{"caisson":175,"x":68.80199997513382,"y":22.500269501297563},{"caisson":176,"x":74.09366560570987,"y":22.534990310668945},{"caisson":177,"x":79.48718129852672,"y":22.479437015674733},{"caisson":178,"x":84.77885399335696,"y":22.423876656426323},{"caisson":179,"x":88.677003648546,"y":22.541934472543222},{"caisson":180,"x":61.29737194673515,"y":25.77804812678584},{"caisson":181,"x":63.57514652205102,"y":27.375268936157227},{"caisson":182,"x":68.80199997513382,"y":26.576654999344434},{"caisson":183,"x":74.16774137520495,"y":26.59054332309299},{"caisson":184,"x":79.47792241602768,"y":26.555822513721605},{"caisson":185,"x":81.24181488413869,"y":26.555822513721605},{"caisson":186,"x":84.77885399335696,"y":26.56971083747016},{"caisson":187,"x":89.57514821747203,"y":26.555822513721605},{"caisson":188,"x":61.77885267469618,"y":29.965547279075338},{"caisson":189,"x":64.05200016351394,"y":31.521103117201065},{"caisson":190,"x":68.76496209038628,"y":31.243322513721605},{"caisson":191,"x":74.15848249270593,"y":31.187769218727396},{"caisson":192,"x":79.52885097927518,"y":31.243322513721605},{"caisson":193,"x":84.85292505334925,"y":31.31970829433865},{"caisson":194,"x":89.9084821159457,"y":31.28498748496727},{"caisson":195,"x":62.362185819649405,"y":35.39610085663972},{"caisson":196,"x":64.36218450098862,"y":34.347490028098775},{"caisson":197,"x":66.83440738254123,"y":35.85443673310456},{"caisson":198,"x":70.14922153802566,"y":35.951654999344434},{"caisson":199,"x":74.1260740492079,"y":35.89610170435022},{"caisson":200,"x":75.36681375385803,"y":36.12526611045555},{"caisson":201,"x":77.7001463336709,"y":36.12526611045555},{"caisson":202,"x":79.43162800353251,"y":35.89610170435022},{"caisson":203,"x":84.80199649010176,"y":35.93776667559588},{"caisson":204,"x":89.56588462547019,"y":35.89610170435022},{"caisson":205,"x":64.63996510446808,"y":37.229430233990705},{"caisson":206,"x":60.13533509807822,"y":39.3544356028239},{"caisson":207,"x":62.81126045886381,"y":39.7363786344175},{"caisson":208,"x":65.08440794768157,"y":41.284990310668945},{"caisson":209,"x":66.80662838029274,"y":40.38915810761628},{"caisson":210,"x":70.22329730752074,"y":40.409990593239115},{"caisson":211,"x":74.14922361020689,"y":40.409990593239115},{"caisson":212,"x":75.40385163860557,"y":38.27109690065737},{"caisson":213,"x":77.76033377941744,"y":38.22943192941171},{"caisson":214,"x":79.47792241602768,"y":40.00720801176848},{"caisson":215,"x":84.82514840585215,"y":40.02110339977123},{"caisson":216,"x":88.64459285029659,"y":40.02110339977123},{"caisson":217,"x":60.20477671682099,"y":43.805823502717196},{"caisson":218,"x":63.4131113688151,"y":45.132211402610494},{"caisson":219,"x":65.61218544288919,"y":46.06276794716164},{"caisson":220,"x":70.27422116126543,"y":45.84748833267777},{"caisson":221,"x":72.44088914659288,"y":45.77109901993363},{"caisson":222,"x":74.16311193395543,"y":45.18082053573043},{"caisson":223,"x":79.47792241602768,"y":45.12526724073622},{"caisson":224,"x":83.4732950469594,"y":45.146099726359054},{"caisson":225,"x":87.39459661789883,"y":45.1599880501076},{"caisson":226,"x":63.82977991928289,"y":48.687767099451136},{"caisson":227,"x":66.038112875856,"y":50.173877786707},{"caisson":228,"x":70.25570339626736,"y":50.07665598834002},{"caisson":229,"x":74.14922361020689,"y":48.375265686600294},{"caisson":230,"x":81.22329240963782,"y":48.63221027232982},{"caisson":231,"x":64.18626102400414,"y":52.083600008929224},{"caisson":232,"x":62.24181563765915,"y":55.08359803093804},{"caisson":233,"x":66.55199969256365,"y":54.48637891698767},{"caisson":234,"x":70.20477954252267,"y":54.31971196775083},{"caisson":235,"x":76.55662960476346,"y":55.528045583654325},{"caisson":236,"x":77.75570433816792,"y":53.722489321673365},{"caisson":237,"x":45.01959247353636,"y":56.5974888978181},{"caisson":238,"x":51.11681620279948,"y":56.72248734368218},{"caisson":239,"x":46.53348098566503,"y":58.868321666011106},{"caisson":240,"x":52.81588942916306,"y":59.201657330548315},{"caisson":241,"x":48.038110615294656,"y":61.09054706714772},{"caisson":242,"x":49.51033415617766,"y":63.3058265403465},{"caisson":243,"x":51.02422266830633,"y":65.52804311116537},{"caisson":244,"x":53.86681733308015,"y":64.47943934687862},{"caisson":245,"x":57.50107470853829,"y":58.861377504136826},{"caisson":246,"x":59.48718506612896,"y":58.36137665642632},{"caisson":247,"x":57.931631582754626,"y":62.31971316867404},{"caisson":248,"x":56.913112122335555,"y":63.868324844925496},{"caisson":249,"x":54.21866899655189,"y":66.3405453717267},{"caisson":250,"x":56.658483434606474,"y":65.7224937721535},{"caisson":251,"x":58.26959492247782,"y":65.3405436763057},{"caisson":252,"x":51.737184877748845,"y":69.7919351083261},{"caisson":253,"x":54.60292674877025,"y":68.69470808241103},{"caisson":254,"x":57.01033509807822,"y":69.09054650200737},{"caisson":255,"x":58.616817144700036,"y":68.66693143491392},{"caisson":256,"x":52.4362587634428,"y":74.06971542923539},{"caisson":257,"x":55.38070584520881,"y":73.30582230179398},{"caisson":258,"x":58.99644545566889,"y":72.34054141574435},{"caisson":259,"x":53.42237213511526,"y":79.60443143491392},{"caisson":260,"x":56.31589065363378,"y":78.88915450484664},{"caisson":261,"x":59.63533189561632,"y":78.06277098479094},{"caisson":262,"x":54.07514689881124,"y":83.65999151159215},{"caisson":263,"x":57.019593980577255,"y":82.89609838415075},{"caisson":264,"x":54.75570301950714,"y":87.64610290527344},{"caisson":265,"x":57.718667866271225,"y":86.95860262270327},{"caisson":266,"x":55.36218572545935,"y":91.61137474907768},{"caisson":267,"x":58.30663045247396,"y":90.91693030463325},{"caisson":268,"x":55.79274024492429,"y":95.49332371464482},{"caisson":269,"x":58.704776528440874,"y":94.77804678457754},{"caisson":270,"x":59.871445173098714,"y":61.76415196171513},{"caisson":271,"x":62.33903861340181,"y":59.52804706714772},{"caisson":272,"x":64.73718572545934,"y":57.0419329184073},{"caisson":273,"x":60.20477671682099,"y":65.03498642532914},{"caisson":274,"x":62.76033189561632,"y":63.65304876256872},{"caisson":275,"x":65.11681639117958,"y":60.45860007957175},{"caisson":276,"x":66.9594093605324,"y":58.61832124215586},{"caisson":277,"x":60.53811061529466,"y":68.23637927020037},{"caisson":278,"x":65.46866805465133,"y":63.67387418393735},{"caisson":279,"x":67.58440747673129,"y":64.27110036214194},{"caisson":280,"x":65.802001953125,"y":66.92388322618272},{"caisson":281,"x":60.98718525450907,"y":71.90998925103081},{"caisson":282,"x":66.20014802909192,"y":70.61832569263599},{"caisson":283,"x":68.07977652844087,"y":68.54193652117694},{"caisson":284,"x":61.39459492247782,"y":75.72248953360098},{"caisson":285,"x":66.66311099205488,"y":74.46554678457754},{"caisson":286,"x":68.57051849365234,"y":73.02804876256872},{"caisson":287,"x":62.09366880817178,"y":77.53498642532914},{"caisson":288,"x":65.37144507890866,"y":76.70165874339916},{"caisson":289,"x":68.95014915937259,"y":76.3961014924226},{"caisson":290,"x":60.04737100483458,"y":82.09749151159215},{"caisson":291,"x":62.547370533884305,"y":81.5280419808847},{"caisson":292,"x":65.89922257411627,"y":80.69471429895472},{"caisson":293,"x":69.43162988733363,"y":81.24332427978516},{"caisson":294,"x":60.51959285029659,"y":86.17387700963903},{"caisson":295,"x":62.98718393584828,"y":85.57665789568865},{"caisson":296,"x":66.29274156358507,"y":84.7710997970016},{"caisson":297,"x":70.01496303228684,"y":86.15304452401621},{"caisson":298,"x":60.968667489511,"y":90.29887870506003},{"caisson":299,"x":63.45014689881124,"y":89.65304339373553},{"caisson":300,"x":66.75570452654803,"y":88.81970864755137},{"caisson":301,"x":70.3714441370081,"y":89.43776731137876},{"caisson":302,"x":61.38070424397787,"y":94.09054650200737},{"caisson":303,"x":63.86218600802951,"y":93.51415280942564},{"caisson":304,"x":67.16310948501399,"y":92.70860177499277},{"caisson":305,"x":70.62144338348766,"y":91.81971373381438},{"caisson":306,"x":70.1584804205247,"y":61.69471034297237},{"caisson":307,"x":73.82977803548178,"y":59.65999320701316},{"caisson":308,"x":71.28811118043498,"y":63.43777268021194},{"caisson":309,"x":74.54736968617381,"y":62.778041980884694},{"caisson":310,"x":69.871445644049,"y":65.6044359560366},{"caisson":311,"x":72.23255487135899,"y":66.70165591769748},{"caisson":312,"x":70.39922078450522,"y":70.85443426061559},{"caisson":314,"x":77.71866645342038,"y":73.63915620026765},{"caisson":315,"x":79.96403729474103,"y":69.82665591769748},{"caisson":316,"x":80.57977652844087,"y":77.33359866672092},{"caisson":317,"x":82.80662725001206,"y":73.42388011791088},{"caisson":318,"x":83.34829542371962,"y":80.9655436763057},{"caisson":319,"x":85.60292279278791,"y":77.03499264187283},{"caisson":320,"x":85.23718280556761,"y":83.40304339373553},{"caisson":321,"x":87.51033735863956,"y":79.51415733054831},{"caisson":322,"x":87.06589216067468,"y":85.79193397804544},{"caisson":323,"x":89.36218921049142,"y":81.9377687242296},{"caisson":324,"x":89.0149669882692,"y":88.3058265403465},{"caisson":325,"x":92.1168150725188,"y":85.61137870506003},{"caisson":326,"x":90.9316310176143,"y":90.83360036214194},{"caisson":327,"x":92.5612602704837,"y":91.71554424144604},{"caisson":328,"x":94.35755882734134,"y":88.4516539397063},{"caisson":329,"x":96.84829240963782,"y":91.59748642532914}];
+const STARTING={"64":{"lat":41.976,"lon":-87.91239,"verified":true,"status":"Verified GPS","notes":"Field control point."},"65":{"lat":41.97697,"lon":-87.91079,"verified":true,"status":"Verified GPS","notes":"Corrected field control point."},"66":{"lat":41.97623,"lon":-87.91258,"verified":true,"status":"Verified GPS","notes":"Field control point."},"67":{"lat":41.97644,"lon":-87.91267,"verified":true,"status":"Verified GPS","notes":"Field control point."},"68":{"lat":41.97633,"lon":-87.9126,"verified":true,"status":"Verified GPS","notes":"Field control point; one uploaded photo showed a visible green 68 marking."},"73":{"lat":41.97604,"lon":-87.9124,"verified":true,"status":"Verified GPS","notes":"Field control point."},"75":{"lat":41.97607,"lon":-87.91223,"verified":true,"status":"Verified GPS","notes":"Field control point."},"77":{"lat":41.97603,"lon":-87.91235,"verified":true,"status":"Verified GPS","notes":"Field control point."},"110":{"lat":41.97643,"lon":-87.91247,"verified":true,"status":"Verified GPS","notes":"Corrected field coordinate."},"113":{"lat":41.97655,"lon":-87.91246,"verified":true,"status":"Verified GPS","notes":"Corrected from earlier mistaken label."},"120":{"lat":41.97634,"lon":-87.91248,"verified":true,"status":"Verified GPS","notes":"Field control point."},"124":{"lat":41.97635,"lon":-87.91232,"verified":true,"status":"Verified GPS","notes":"Field control point."},"128":{"lat":41.97635,"lon":-87.91219,"verified":true,"status":"Verified GPS","notes":"Field control point."},"129":{"lat":41.97636,"lon":-87.91216,"verified":true,"status":"Verified GPS","notes":"Successfully predicted from GPS and confirmed by user."},"130":{"lat":41.97632,"lon":-87.91212,"verified":true,"status":"Verified GPS","notes":"Field control point."},"154":{"lat":41.97648,"lon":-87.91257,"verified":true,"status":"Verified GPS","notes":"Field control point."},"196":{"lat":41.97655,"lon":-87.91211,"verified":true,"status":"Verified GPS","notes":"Field control point."},"205":{"lat":41.97647,"lon":-87.91199,"verified":true,"status":"Verified GPS","notes":"Field control point."}};
+let records=JSON.parse(localStorage.getItem("ordCaissonRecords")||JSON.stringify(STARTING));
+let selected=null;
+const $=id=>document.getElementById(id);
+const dbPromise=new Promise((resolve,reject)=>{
+ const req=indexedDB.open("ordCaissonPhotos",1);
+ req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains("photos"))req.result.createObjectStore("photos",{keyPath:"id"});}
+ req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+});
+function saveRecords(){localStorage.setItem("ordCaissonRecords",JSON.stringify(records));renderPins();}
+function record(n){return records[n]||{status:"No information",verified:false,notes:"",lat:null,lon:null,condition:"",updated:"",photos:[]};}
+function renderPins(){
+ $("pins").innerHTML=HOTSPOTS.map(h=>{
+   const r=record(h.caisson), cls=(r.lat!=null||r.notes||r.photos?.length)?"known":"";
+   return `<button class="pin ${cls} ${selected===h.caisson?"selected":""}" data-n="${h.caisson}" style="left:${h.x}%;top:${h.y}%">${h.caisson}</button>`;
+ }).join("");
+ document.querySelectorAll(".pin").forEach(p=>p.onclick=()=>selectCaisson(+p.dataset.n));
+}
+async function selectCaisson(n){
+ selected=n;renderPins();const r=record(n);
+ $("panel").innerHTML=`
+ <div class="card">
+   <h2>Caisson ${n}</h2>
+   <span class="badge ${r.verified?"green":"gray"}">${r.verified?"Verified location":"Not verified"}</span>
+   <label class="label">Status</label><select id="status">
+    ${["No information","Verified GPS","Needs review","Repair required","Accepted","Backfilled"].map(x=>`<option ${r.status===x?"selected":""}>${x}</option>`).join("")}
+   </select>
+   <div class="row">
+    <div><label class="label">Latitude</label><input id="lat" type="number" step="any" value="${r.lat??""}"></div>
+    <div><label class="label">Longitude</label><input id="lon" type="number" step="any" value="${r.lon??""}"></div>
+   </div>
+   <label class="label">Condition / work stage</label><input id="condition" value="${esc(r.condition||"")}" placeholder="Excavated, standing water, repair...">
+   <label class="label">Notes</label><textarea id="notes" rows="4">${esc(r.notes||"")}</textarea>
+   <label class="label"><input id="verified" type="checkbox" ${r.verified?"checked":""} style="width:auto"> GPS/location verified</label>
+   <button id="save">Save Caisson Information</button>
+ </div>
+ <div class="card">
+   <h2 style="font-size:17px">Photos</h2>
+   <input id="photos" type="file" accept="image/*" multiple>
+   <button id="addPhotos">Add Photos</button>
+   <div id="photoGrid" class="photo-grid" style="margin-top:10px"></div>
+   <p class="tiny">Photos are stored locally on this device in the browser.</p>
+ </div>`;
+ $("save").onclick=()=>{
+   records[n]={...r,status:$("status").value,lat:numOrNull($("lat").value),lon:numOrNull($("lon").value),
+     condition:$("condition").value,notes:$("notes").value,verified:$("verified").checked,
+     updated:new Date().toISOString(),photos:r.photos||[]};
+   saveRecords();selectCaisson(n);
+ };
+ $("addPhotos").onclick=()=>addPhotos(n);
+ await showPhotos(n);
+ const spot=HOTSPOTS.find(x=>x.caisson===n);
+ if(spot){
+   const shell=$("mapShell"),map=$("map");
+   shell.scrollTo({left:map.offsetWidth*spot.x/100-shell.clientWidth/2,top:map.offsetHeight*spot.y/100-shell.clientHeight/2,behavior:"smooth"});
+ }
+}
+function esc(s){return String(s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));}
+function numOrNull(v){const n=Number(v);return v!==""&&Number.isFinite(n)?n:null;}
+async function addPhotos(n){
+ const files=[...$("photos").files];if(!files.length)return;
+ const db=await dbPromise,tx=db.transaction("photos","readwrite"),store=tx.objectStore("photos");
+ const r=record(n);r.photos=r.photos||[];
+ for(const f of files){const id=`${n}-${Date.now()}-${Math.random()}`;store.put({id,caisson:n,name:f.name,type:f.type,blob:f,date:new Date().toISOString()});r.photos.push(id);}
+ records[n]=r;saveRecords();tx.oncomplete=()=>selectCaisson(n);
+}
+async function showPhotos(n){
+ const grid=$("photoGrid");if(!grid)return;const ids=record(n).photos||[];if(!ids.length){grid.innerHTML='<span class="tiny">No photos added.</span>';return;}
+ const db=await dbPromise,tx=db.transaction("photos"),store=tx.objectStore("photos");
+ const photos=await Promise.all(ids.map(id=>new Promise(res=>{const q=store.get(id);q.onsuccess=()=>res(q.result);q.onerror=()=>res(null);})));
+ grid.innerHTML=photos.filter(Boolean).map(p=>`<img src="${URL.createObjectURL(p.blob)}" title="${esc(p.name)}">`).join("");
+}
+$("jump").onclick=()=>{const n=+$("search").value;if(HOTSPOTS.some(x=>x.caisson===n))selectCaisson(n);else alert("That caisson number was not found on this plan.");};
+$("search").addEventListener("keydown",e=>{if(e.key==="Enter")$("jump").click();});
+$("export").onclick=()=>{
+ const clean=Object.fromEntries(Object.entries(records).map(([n,r])=>[n,{...r,photoCount:(r.photos||[]).length,photos:undefined}]));
+ const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(clean,null,2)],{type:"application/json"}));a.download="ORD-caisson-data.json";a.click();
+};
+if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});
+renderPins();
+</script>
+</body></html>
