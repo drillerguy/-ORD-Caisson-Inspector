@@ -30,7 +30,8 @@ if (!document.getElementById(PHOTO_STYLE_ID)) {
 
 const DEFAULT_RECORD = {status:"No information",verified:false,notes:"",lat:null,lon:null,condition:"",updated:"",photos:[]};
 const pendingPhotoAdds = new Map();
-const TRACKING_ACCURACY_WARNING_METERS = 9; // Warn when GPS drift is about 30 ft, which can put the marker on the wrong caisson.
+const TRACKING_ACCURACY_WARNING_METERS = 9; // Warn when GPS drift is approximately 30 ft, which can put the marker on the wrong caisson.
+const FALLBACK_ACCURACY_RING_PERCENT = 0.4; // Keep the accuracy ring visible even when map scale cannot be estimated yet.
 const TRACKING_CONTROL_ID = "trackingBar";
 const EARTH_RADIUS_METERS = 6378137;
 
@@ -368,7 +369,7 @@ function gpsToMapPosition(gps){
   let weightedX = 0;
   let weightedY = 0;
   for(const point of ranked){
-    const weight = 1 / Math.max(point.distance, 1) ** 2; // Keep very close control points from overwhelming the interpolation.
+    const weight = 1 / Math.max(point.distance, 1) ** 2; // Prevent near-zero distances from creating unstable weights.
     totalWeight += weight;
     weightedX += point.targetX * weight;
     weightedY += point.targetY * weight;
@@ -507,7 +508,7 @@ function syncTrackingOverlay(){
   if(map && accuracyRing && Number.isFinite(trackingState.current.accuracy)){
     const nearest = getNearestCaisson(trackingState.current);
     const distanceForOpacity = nearest?.distance ?? trackingState.current.accuracy;
-    const percentRadius = averageMetersPerPercent > 0 ? trackingState.current.accuracy / averageMetersPerPercent : 0.4; // Fall back to a small visible ring when scale cannot be estimated.
+    const percentRadius = averageMetersPerPercent > 0 ? trackingState.current.accuracy / averageMetersPerPercent : FALLBACK_ACCURACY_RING_PERCENT;
     accuracyRing.style.width = `${Math.max(18, map.offsetWidth * percentRadius / 100 * 2)}px`;
     accuracyRing.style.height = `${Math.max(18, map.offsetWidth * percentRadius / 100 * 2)}px`;
     accuracyRing.style.opacity = distanceForOpacity > TRACKING_ACCURACY_WARNING_METERS ? "0.85" : "1";
@@ -715,7 +716,7 @@ globalThis.selectCaisson = async function(n){
     <label class="label">Notes</label><textarea id="notes" rows="4">${esc(r.notes||"")}</textarea>
     <label class="label"><input id="verified" type="checkbox" ${r.verified?"checked":""} style="width:auto"> GPS/location verified</label>
     <button id="save">Save Caisson Information</button>
-    <p class="tracking-note">Live GPS can auto-fill a missing location when you add photos, and the pulsing blue position marker stays on the drawing while you move.</p>
+    <p class="tracking-note">Live GPS can auto-fill a missing location when you add photos, and the blue position marker with its accuracy ring stays on the drawing while you move.</p>
   </div>
   <div class="card">
     <h2 style="font-size:17px">Photos</h2>
