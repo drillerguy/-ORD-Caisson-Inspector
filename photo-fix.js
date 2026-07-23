@@ -91,7 +91,7 @@ function createPhotoId(n){
     globalThis.crypto.getRandomValues(bytes);
     return `${n}-${Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("")}`;
   }
-  throw new Error("Secure photo ID generation is not available in this browser.");
+  throw new Error("Crypto API unavailable: cannot generate secure photo IDs.");
 }
 
 function exifDateToIso(value){
@@ -250,11 +250,12 @@ globalThis.addPhotos = async function(n){
     const tx = db.transaction("photos", "readwrite");
     const store = tx.objectStore("photos");
     const current = record(n);
-    const needsLocationUpdate = current.lat === null || current.lon === null;
+    const locationMissing = current.lat === null || current.lon === null;
     current.photos = [...(current.photos || [])];
     const fileEntries = await Promise.all(files.map(async file => ({file, metadata:await readPhotoMetadata(file)})));
-    let gpsToApply = fileEntries.find(({metadata}) => metadata.gps)?.metadata.gps || null;
-    const fallbackGps = !gpsToApply && needsLocationUpdate ? await getDeviceGps() : null;
+    const entryWithGps = fileEntries.find(({metadata}) => metadata.gps);
+    let gpsToApply = entryWithGps ? entryWithGps.metadata.gps : null;
+    const fallbackGps = !gpsToApply && locationMissing ? await getDeviceGps() : null;
 
     for(const {file, metadata} of fileEntries){
       const id = createPhotoId(n);
@@ -272,7 +273,7 @@ globalThis.addPhotos = async function(n){
       current.photos.push(id);
     }
 
-    if(gpsToApply && needsLocationUpdate){
+    if(gpsToApply && locationMissing){
       current.lat = gpsToApply.lat;
       current.lon = gpsToApply.lon;
       applyGpsToInputs(gpsToApply);
