@@ -43,7 +43,6 @@ const trackingState = {
 };
 
 let geoReference = null;
-let hotspotGpsLookup = new Map();
 let averageMetersPerPercent = 0;
 
 refreshGeoReference();
@@ -312,50 +311,16 @@ function unprojectPoint(point, origin){
   };
 }
 
-function solve3x3(matrix, vector){
-  const rows = matrix.map((row, index) => [...row, vector[index]]);
-  for(let col=0; col<3; col++){
-    let pivot = col;
-    for(let row=col+1; row<3; row++){
-      if(Math.abs(rows[row][col]) > Math.abs(rows[pivot][col])) pivot = row;
-    }
-    if(Math.abs(rows[pivot][col]) < 1e-9) return null;
-    if(pivot !== col) [rows[col], rows[pivot]] = [rows[pivot], rows[col]];
-    const pivotValue = rows[col][col];
-    for(let j=col; j<4; j++) rows[col][j] /= pivotValue;
-    for(let row=0; row<3; row++){
-      if(row === col) continue;
-      const factor = rows[row][col];
-      for(let j=col; j<4; j++) rows[row][j] -= factor * rows[col][j];
-    }
-  }
-  return rows.map(row => row[3]);
-}
-
-function fitAffine(points, targetKey){
-  const xtx = [[0,0,0],[0,0,0],[0,0,0]];
-  const xty = [0,0,0];
-  for(const point of points){
-    const row = [point.sourceX, point.sourceY, 1];
-    for(let i=0;i<3;i++){
-      xty[i] += row[i] * point[targetKey];
-      for(let j=0;j<3;j++) xtx[i][j] += row[i] * row[j];
-    }
-  }
-  return solve3x3(xtx, xty);
-}
-
 function buildAverageMetersPerPercent(){
-  if(!hotspotGpsLookup.size) return 0;
+  if(!geoReference?.controlPoints?.length) return 0;
   const samples = [];
-  for(let i=1;i<HOTSPOTS.length;i++){
-    const previous = HOTSPOTS[i-1];
-    const current = HOTSPOTS[i];
-    const gpsA = hotspotGpsLookup.get(previous.caisson);
-    const gpsB = hotspotGpsLookup.get(current.caisson);
-    const deltaPercent = Math.hypot(previous.x - current.x, previous.y - current.y);
-    const deltaMeters = haversineDistance(gpsA, gpsB);
-    if(deltaPercent > 0 && Number.isFinite(deltaMeters)) samples.push(deltaMeters / deltaPercent);
+  const controls = geoReference.controlPoints;
+  for(let i=0;i<controls.length;i++){
+    for(let j=i+1;j<controls.length;j++){
+      const deltaPercent = Math.hypot(controls[i].targetX - controls[j].targetX, controls[i].targetY - controls[j].targetY);
+      const deltaMeters = haversineDistance(controls[i].gps, controls[j].gps);
+      if(deltaPercent > 0 && Number.isFinite(deltaMeters)) samples.push(deltaMeters / deltaPercent);
+    }
   }
   if(!samples.length) return 0;
   return samples.reduce((sum, value) => sum + value, 0) / samples.length;
@@ -363,7 +328,6 @@ function buildAverageMetersPerPercent(){
 
 function refreshGeoReference(){
   geoReference = buildGeoReference();
-  hotspotGpsLookup = buildHotspotGpsLookup();
   averageMetersPerPercent = buildAverageMetersPerPercent();
 }
 
@@ -375,42 +339,42 @@ function buildGeoReference(){
   const origin = controlPoints.reduce((acc, {record}) => ({lat:acc.lat + record.lat, lon:acc.lon + record.lon}), {lat:0, lon:0});
   origin.lat /= controlPoints.length;
   origin.lon /= controlPoints.length;
-  const points = controlPoints.map(({spot, record}) => {
-    const projected = projectGps(record, origin);
-    return {sourceX:projected.x, sourceY:projected.y, targetX:spot.x, targetY:spot.y};
-  });
-  const xCoefficients = fitAffine(points, "targetX");
-  const yCoefficients = fitAffine(points, "targetY");
-  if(!xCoefficients || !yCoefficients) return null;
-  const [a, b, c] = xCoefficients;
-  const [d, e, f] = yCoefficients;
-  const determinant = a * e - b * d;
-  if(Math.abs(determinant) < 1e-9) return null;
-  return {origin, xCoefficients, yCoefficients, determinant};
+  return {
+    origin,
+    controlPoints:controlPoints.map(({spot, record}) => {
+      const projected = projectGps(record, origin);
+      return {
+        caisson:spot.caisson,
+        gps:{lat:record.lat, lon:record.lon},
+        sourceX:projected.x,
+        sourceY:projected.y,
+        targetX:spot.x,
+        targetY:spot.y
+      };
+    })
+  };
 }
 
 function gpsToMapPosition(gps){
   if(!geoReference || !gps) return null;
   const projected = projectGps(gps, geoReference.origin);
-  const [a, b, c] = geoReference.xCoefficients;
-  const [d, e, f] = geoReference.yCoefficients;
-  return {
-    x:a * projected.x + b * projected.y + c,
-    y:d * projected.x + e * projected.y + f
-  };
-}
-
-function mapToGps(x, y){
-  if(!geoReference) return null;
-  const [a, b, c] = geoReference.xCoefficients;
-  const [d, e, f] = geoReference.yCoefficients;
-  const translatedX = x - c;
-  const translatedY = y - f;
-  const projected = {
-    x:( translatedX * e - translatedY * b) / geoReference.determinant,
-    y:(-translatedX * d + translatedY * a) / geoReference.determinant
-  };
-  return unprojectPoint(projected, geoReference.origin);
+  const ranked = geoReference.controlPoints
+    .map(point => ({...point, distance:Math.hypot(projected.x - point.sourceX, projected.y - point.sourceY)}))
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, Math.min(6, geoReference.controlPoints.length));
+  if(!ranked.length) return null;
+  if(ranked[0].distance < 0.01) return {x:ranked[0].targetX, y:ranked[0].targetY};
+  let totalWeight = 0;
+  let weightedX = 0;
+  let weightedY = 0;
+  for(const point of ranked){
+    const weight = 1 / Math.max(point.distance, 1) ** 2;
+    totalWeight += weight;
+    weightedX += point.targetX * weight;
+    weightedY += point.targetY * weight;
+  }
+  if(!totalWeight) return null;
+  return {x:weightedX / totalWeight, y:weightedY / totalWeight};
 }
 
 function haversineDistance(a, b){
@@ -425,19 +389,15 @@ function haversineDistance(a, b){
   return 2 * EARTH_RADIUS_METERS * Math.asin(Math.min(1, Math.sqrt(calc)));
 }
 
-function buildHotspotGpsLookup(){
-  if(!geoReference) return new Map();
-  return new Map(HOTSPOTS.map(spot => [spot.caisson, mapToGps(spot.x, spot.y)]));
-}
-
 function getNearestCaisson(gps){
+  const position = gpsToMapPosition(gps);
+  if(!position) return null;
   let best = null;
   for(const spot of HOTSPOTS){
-    const estimatedGps = hotspotGpsLookup.get(spot.caisson);
-    if(!estimatedGps) continue;
-    const distance = haversineDistance(gps, estimatedGps);
+    const distancePercent = Math.hypot(position.x - spot.x, position.y - spot.y);
+    const distance = averageMetersPerPercent > 0 ? distancePercent * averageMetersPerPercent : distancePercent;
     if(!best || distance < best.distance){
-      best = {caisson:spot.caisson, distance, estimatedGps, spot};
+      best = {caisson:spot.caisson, distance, spot, position};
     }
   }
   return best;
@@ -546,9 +506,7 @@ function syncTrackingOverlay(){
   const accuracyRing = $("liveLocationAccuracy");
   if(map && accuracyRing && Number.isFinite(trackingState.current.accuracy)){
     const nearest = getNearestCaisson(trackingState.current);
-    const nearestMapGps = nearest?.estimatedGps;
-    const currentGps = trackingState.current;
-    const offsetDistance = nearestMapGps ? haversineDistance(currentGps, nearestMapGps) : trackingState.current.accuracy;
+    const offsetDistance = nearest?.distance ?? trackingState.current.accuracy;
     const percentRadius = averageMetersPerPercent > 0 ? trackingState.current.accuracy / averageMetersPerPercent : 0.4;
     accuracyRing.style.width = `${Math.max(18, map.offsetWidth * percentRadius / 100 * 2)}px`;
     accuracyRing.style.height = `${Math.max(18, map.offsetWidth * percentRadius / 100 * 2)}px`;
