@@ -91,7 +91,7 @@ function createPhotoId(n){
     globalThis.crypto.getRandomValues(bytes);
     return `${n}-${Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("")}`;
   }
-  throw new Error("Crypto API unavailable: cannot generate secure photo IDs.");
+  throw new Error("Unable to generate photo ID: secure browser crypto APIs are unavailable.");
 }
 
 function exifDateToIso(value){
@@ -250,12 +250,13 @@ globalThis.addPhotos = async function(n){
     const tx = db.transaction("photos", "readwrite");
     const store = tx.objectStore("photos");
     const current = record(n);
-    const locationMissing = current.lat === null || current.lon === null;
+    const isLocationMissing = current.lat === null || current.lon === null;
     current.photos = [...(current.photos || [])];
     const fileEntries = await Promise.all(files.map(async file => ({file, metadata:await readPhotoMetadata(file)})));
-    const entryWithGps = fileEntries.find(({metadata}) => metadata.gps);
-    let gpsToApply = entryWithGps ? entryWithGps.metadata.gps : null;
-    const fallbackGps = !gpsToApply && locationMissing ? await getDeviceGps() : null;
+    const firstEntryWithGps = fileEntries.find(({metadata}) => metadata.gps);
+    let gpsToApply = firstEntryWithGps ? firstEntryWithGps.metadata.gps : null;
+    const needsDeviceGps = isLocationMissing && !gpsToApply && fileEntries.some(({metadata}) => !metadata.gps);
+    const fallbackGps = needsDeviceGps ? await getDeviceGps() : null;
 
     for(const {file, metadata} of fileEntries){
       const id = createPhotoId(n);
@@ -273,7 +274,7 @@ globalThis.addPhotos = async function(n){
       current.photos.push(id);
     }
 
-    if(gpsToApply && locationMissing){
+    if(gpsToApply && isLocationMissing){
       current.lat = gpsToApply.lat;
       current.lon = gpsToApply.lon;
       applyGpsToInputs(gpsToApply);
@@ -375,7 +376,13 @@ globalThis.selectCaisson = async function(n){
 
   $("save").onclick = async () => {
     const formValues = readCurrentFormValues();
-    await (pendingPhotoAdds.get(n) || Promise.resolve());
+    try{
+      await (pendingPhotoAdds.get(n) || Promise.resolve());
+    }catch(err){
+      console.error("Unable to finish saving photos", err);
+      alert("The photo could not be saved. Please try adding it again.");
+      return;
+    }
     const current = record(n);
     records[n] = {
       ...current,
