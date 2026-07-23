@@ -158,7 +158,7 @@ function createPhotoId(n){
     globalThis.crypto.getRandomValues(bytes);
     return `${n}-${Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("")}`;
   }
-  throw new Error("Unable to generate photo ID: this browser does not support secure random number generation. Please use a modern browser.");
+  throw new Error("Unable to generate photo ID: this browser does not support the secure random features needed to save photos. Please use a current version of Safari, Chrome, Edge, or Firefox.");
 }
 
 function exifDateToIso(value){
@@ -286,7 +286,7 @@ async function readPhotoMetadata(file){
       offset += 2 + size;
     }
   }catch(err){
-    console.warn("Unable to read photo metadata. Photo will be saved without EXIF data.", err);
+    console.warn("Unable to extract EXIF metadata from photo. The photo will still be saved, but image date/time and GPS metadata will not be available.", err);
   }
   return {capturedAt:fallbackDate, gps:null};
 }
@@ -506,11 +506,11 @@ function syncTrackingOverlay(){
   const accuracyRing = $("liveLocationAccuracy");
   if(map && accuracyRing && Number.isFinite(trackingState.current.accuracy)){
     const nearest = getNearestCaisson(trackingState.current);
-    const offsetDistance = nearest?.distance ?? trackingState.current.accuracy;
+    const distanceForOpacity = nearest?.distance ?? trackingState.current.accuracy;
     const percentRadius = averageMetersPerPercent > 0 ? trackingState.current.accuracy / averageMetersPerPercent : 0.4;
     accuracyRing.style.width = `${Math.max(18, map.offsetWidth * percentRadius / 100 * 2)}px`;
     accuracyRing.style.height = `${Math.max(18, map.offsetWidth * percentRadius / 100 * 2)}px`;
-    accuracyRing.style.opacity = offsetDistance > TRACKING_ACCURACY_WARNING_METERS ? "0.85" : "1";
+    accuracyRing.style.opacity = distanceForOpacity > TRACKING_ACCURACY_WARNING_METERS ? "0.85" : "1";
   }
   centerMapOnPosition(position);
 }
@@ -715,7 +715,7 @@ globalThis.selectCaisson = async function(n){
     <label class="label">Notes</label><textarea id="notes" rows="4">${esc(r.notes||"")}</textarea>
     <label class="label"><input id="verified" type="checkbox" ${r.verified?"checked":""} style="width:auto"> GPS/location verified</label>
     <button id="save">Save Caisson Information</button>
-    <p class="tracking-note">Live GPS can auto-fill a missing location when you add photos, and the blue dot stays on the drawing while you move.</p>
+    <p class="tracking-note">Live GPS can auto-fill a missing location when you add photos, and the blue position marker stays on the drawing while you move.</p>
   </div>
   <div class="card">
     <h2 style="font-size:17px">Photos</h2>
@@ -731,7 +731,7 @@ globalThis.selectCaisson = async function(n){
       await (pendingPhotoAdds.get(n) || Promise.resolve());
     }catch(err){
       console.error("Unable to finish saving photos", err);
-      alert(`Unable to save photo: ${err?.message || "Unknown error"}. Please try adding it again.`);
+      alert(`Unable to complete photo addition: ${err?.message || "Unknown error"}. Please try adding the photo again.`);
       return;
     }
     const current = record(n);
