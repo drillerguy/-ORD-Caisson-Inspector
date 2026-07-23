@@ -8,12 +8,46 @@ if (!document.getElementById(PHOTO_STYLE_ID)) {
     .photo-meta{margin-top:8px;font-size:12px;color:#4e5965;line-height:1.35;word-break:break-word}
     .photo-meta strong{color:#16202a}
     .photo-delete{margin-top:8px;width:100%;background:#c32727}
+    .tracking-bar{margin-top:10px;display:flex;gap:8px;align-items:stretch;flex-wrap:wrap}
+    .tracking-toggle.on{background:#16803d}
+    .tracking-status{flex:1;min-width:220px;background:#ffffff1a;border:1px solid #ffffff2f;border-radius:10px;padding:9px 11px;font-size:12px;line-height:1.4;color:white}
+    .tracking-status strong{display:block;font-size:13px}
+    .tracking-status .warning{color:#ffe28b}
+    .tracking-status .muted{opacity:.82}
+    .live-location-marker{position:absolute;transform:translate(-50%,-50%);pointer-events:none;z-index:6}
+    .live-location-dot{position:relative;width:18px;height:18px;border-radius:50%;background:#1487ff;border:3px solid #fff;box-shadow:0 0 0 2px #1487ff66,0 1px 5px #0006}
+    .live-location-dot::after{content:"";position:absolute;inset:-7px;border-radius:50%;border:2px solid #1487ff66}
+    .live-location-accuracy{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);border-radius:50%;background:#1487ff26;border:1px solid #1487ff55;min-width:18px;min-height:18px}
+    .tracking-note{margin-top:8px;font-size:12px;color:#6b7580;line-height:1.35}
+    @media(max-width:760px){
+      .tracking-bar{display:block}
+      .tracking-toggle{width:100%}
+      .tracking-status{margin-top:8px;min-width:0}
+    }
   `;
   document.head.appendChild(style);
 }
 
 const DEFAULT_RECORD = {status:"No information",verified:false,notes:"",lat:null,lon:null,condition:"",updated:"",photos:[]};
 const pendingPhotoAdds = new Map();
+const TRACKING_ACCURACY_WARNING_METERS = 9;
+const TRACKING_CONTROL_ID = "trackingBar";
+const EARTH_RADIUS_METERS = 6378137;
+
+const trackingState = {
+  watchId:null,
+  current:null,
+  lastError:"",
+  isStarting:false,
+  hasCentered:false
+};
+
+let geoReference = null;
+let hotspotGpsLookup = new Map();
+let averageMetersPerPercent = 0;
+
+refreshGeoReference();
+ensureTrackingControls();
 
 globalThis.record = function(n){
   const current = records[n];
@@ -22,7 +56,9 @@ globalThis.record = function(n){
 
 globalThis.saveRecords = function(){
   localStorage.setItem("ordCaissonRecords", JSON.stringify(records));
+  refreshGeoReference();
   renderPins();
+  syncTrackingOverlay();
 };
 
 function formatStoredDate(value){
@@ -34,6 +70,13 @@ function formatStoredDate(value){
 
 function formatCoordinate(value){
   return Number.isFinite(value) ? value.toFixed(6) : "";
+}
+
+function formatDistance(meters){
+  if(!Number.isFinite(meters)) return "";
+  const feet = meters * 3.28084;
+  if(feet < 1000) return `${Math.round(feet)} ft`;
+  return `${(meters / 1609.344).toFixed(2)} mi`;
 }
 
 function describeMetadata(photo){
@@ -58,6 +101,22 @@ function readCurrentFormValues(){
   };
 }
 
+function ensureTrackingControls(){
+  const header = document.querySelector("header");
+  if(!header || document.getElementById(TRACKING_CONTROL_ID)) return;
+  const bar = document.createElement("div");
+  bar.id = TRACKING_CONTROL_ID;
+  bar.className = "tracking-bar";
+  bar.innerHTML = `
+    <button id="trackToggle" class="tracking-toggle secondary" type="button">Start Live GPS</button>
+    <div id="trackingStatus" class="tracking-status">
+      <strong>Live GPS is off</strong>
+      <div class="muted">Turn it on to follow your location on the drawing and see the nearest caisson.</div>
+    </div>`;
+  header.appendChild(bar);
+  $("trackToggle")?.addEventListener("click", toggleTracking);
+}
+
 function applyGpsToInputs(gps){
   if(!gps || !Number.isFinite(gps.lat) || !Number.isFinite(gps.lon)) return;
   const latInput = $("lat");
@@ -66,13 +125,22 @@ function applyGpsToInputs(gps){
   if(lonInput && !lonInput.value) lonInput.value = String(gps.lon);
 }
 
+function getTrackedGps(){
+  const current = trackingState.current;
+  if(!current) return null;
+  const ageMs = Date.now() - current.timestamp;
+  return ageMs <= 120000 ? {lat:current.lat, lon:current.lon, accuracy:current.accuracy} : null;
+}
+
 function getDeviceGps(){
+  const tracked = getTrackedGps();
+  if(tracked) return Promise.resolve(tracked);
   if(!navigator.geolocation?.getCurrentPosition) return Promise.resolve(null);
   return new Promise(resolve => {
     navigator.geolocation.getCurrentPosition(
       ({coords}) => {
         if(Number.isFinite(coords?.latitude) && Number.isFinite(coords?.longitude)){
-          resolve({lat:coords.latitude, lon:coords.longitude});
+          resolve({lat:coords.latitude, lon:coords.longitude, accuracy:Number.isFinite(coords?.accuracy) ? coords.accuracy : null});
         }else{
           resolve(null);
         }
@@ -224,6 +292,329 @@ async function readPhotoMetadata(file){
   return {capturedAt:fallbackDate, gps:null};
 }
 
+function toRadians(value){
+  return value * Math.PI / 180;
+}
+
+function projectGps(gps, origin){
+  const cosLat = Math.cos(toRadians(origin.lat));
+  return {
+    x:(gps.lon - origin.lon) * toRadians(1) * EARTH_RADIUS_METERS * cosLat,
+    y:(gps.lat - origin.lat) * toRadians(1) * EARTH_RADIUS_METERS
+  };
+}
+
+function unprojectPoint(point, origin){
+  const cosLat = Math.cos(toRadians(origin.lat));
+  return {
+    lat:origin.lat + (point.y / EARTH_RADIUS_METERS) / toRadians(1),
+    lon:origin.lon + (point.x / (EARTH_RADIUS_METERS * cosLat)) / toRadians(1)
+  };
+}
+
+function solve3x3(matrix, vector){
+  const rows = matrix.map((row, index) => [...row, vector[index]]);
+  for(let col=0; col<3; col++){
+    let pivot = col;
+    for(let row=col+1; row<3; row++){
+      if(Math.abs(rows[row][col]) > Math.abs(rows[pivot][col])) pivot = row;
+    }
+    if(Math.abs(rows[pivot][col]) < 1e-9) return null;
+    if(pivot !== col) [rows[col], rows[pivot]] = [rows[pivot], rows[col]];
+    const pivotValue = rows[col][col];
+    for(let j=col; j<4; j++) rows[col][j] /= pivotValue;
+    for(let row=0; row<3; row++){
+      if(row === col) continue;
+      const factor = rows[row][col];
+      for(let j=col; j<4; j++) rows[row][j] -= factor * rows[col][j];
+    }
+  }
+  return rows.map(row => row[3]);
+}
+
+function fitAffine(points, targetKey){
+  const xtx = [[0,0,0],[0,0,0],[0,0,0]];
+  const xty = [0,0,0];
+  for(const point of points){
+    const row = [point.sourceX, point.sourceY, 1];
+    for(let i=0;i<3;i++){
+      xty[i] += row[i] * point[targetKey];
+      for(let j=0;j<3;j++) xtx[i][j] += row[i] * row[j];
+    }
+  }
+  return solve3x3(xtx, xty);
+}
+
+function buildAverageMetersPerPercent(){
+  if(!hotspotGpsLookup.size) return 0;
+  const samples = [];
+  for(let i=1;i<HOTSPOTS.length;i++){
+    const previous = HOTSPOTS[i-1];
+    const current = HOTSPOTS[i];
+    const gpsA = hotspotGpsLookup.get(previous.caisson);
+    const gpsB = hotspotGpsLookup.get(current.caisson);
+    const deltaPercent = Math.hypot(previous.x - current.x, previous.y - current.y);
+    const deltaMeters = haversineDistance(gpsA, gpsB);
+    if(deltaPercent > 0 && Number.isFinite(deltaMeters)) samples.push(deltaMeters / deltaPercent);
+  }
+  if(!samples.length) return 0;
+  return samples.reduce((sum, value) => sum + value, 0) / samples.length;
+}
+
+function refreshGeoReference(){
+  geoReference = buildGeoReference();
+  hotspotGpsLookup = buildHotspotGpsLookup();
+  averageMetersPerPercent = buildAverageMetersPerPercent();
+}
+
+function buildGeoReference(){
+  const controlPoints = HOTSPOTS
+    .map(spot => ({spot, record:record(spot.caisson)}))
+    .filter(({record}) => record.verified && Number.isFinite(record.lat) && Number.isFinite(record.lon));
+  if(controlPoints.length < 3) return null;
+  const origin = controlPoints.reduce((acc, {record}) => ({lat:acc.lat + record.lat, lon:acc.lon + record.lon}), {lat:0, lon:0});
+  origin.lat /= controlPoints.length;
+  origin.lon /= controlPoints.length;
+  const points = controlPoints.map(({spot, record}) => {
+    const projected = projectGps(record, origin);
+    return {sourceX:projected.x, sourceY:projected.y, targetX:spot.x, targetY:spot.y};
+  });
+  const xCoefficients = fitAffine(points, "targetX");
+  const yCoefficients = fitAffine(points, "targetY");
+  if(!xCoefficients || !yCoefficients) return null;
+  const [a, b, c] = xCoefficients;
+  const [d, e, f] = yCoefficients;
+  const determinant = a * e - b * d;
+  if(Math.abs(determinant) < 1e-9) return null;
+  return {origin, xCoefficients, yCoefficients, determinant};
+}
+
+function gpsToMapPosition(gps){
+  if(!geoReference || !gps) return null;
+  const projected = projectGps(gps, geoReference.origin);
+  const [a, b, c] = geoReference.xCoefficients;
+  const [d, e, f] = geoReference.yCoefficients;
+  return {
+    x:a * projected.x + b * projected.y + c,
+    y:d * projected.x + e * projected.y + f
+  };
+}
+
+function mapToGps(x, y){
+  if(!geoReference) return null;
+  const [a, b, c] = geoReference.xCoefficients;
+  const [d, e, f] = geoReference.yCoefficients;
+  const translatedX = x - c;
+  const translatedY = y - f;
+  const projected = {
+    x:( translatedX * e - translatedY * b) / geoReference.determinant,
+    y:(-translatedX * d + translatedY * a) / geoReference.determinant
+  };
+  return unprojectPoint(projected, geoReference.origin);
+}
+
+function haversineDistance(a, b){
+  if(!a || !b) return Infinity;
+  const lat1 = toRadians(a.lat);
+  const lat2 = toRadians(b.lat);
+  const dLat = toRadians(b.lat - a.lat);
+  const dLon = toRadians(b.lon - a.lon);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLon = Math.sin(dLon / 2);
+  const calc = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLon * sinLon;
+  return 2 * EARTH_RADIUS_METERS * Math.asin(Math.min(1, Math.sqrt(calc)));
+}
+
+function buildHotspotGpsLookup(){
+  if(!geoReference) return new Map();
+  return new Map(HOTSPOTS.map(spot => [spot.caisson, mapToGps(spot.x, spot.y)]));
+}
+
+function getNearestCaisson(gps){
+  let best = null;
+  for(const spot of HOTSPOTS){
+    const estimatedGps = hotspotGpsLookup.get(spot.caisson);
+    if(!estimatedGps) continue;
+    const distance = haversineDistance(gps, estimatedGps);
+    if(!best || distance < best.distance){
+      best = {caisson:spot.caisson, distance, estimatedGps, spot};
+    }
+  }
+  return best;
+}
+
+function getAccuracyMeters(){
+  return Number.isFinite(trackingState.current?.accuracy) ? trackingState.current.accuracy : null;
+}
+
+function getAccuracyStatusClass(){
+  const accuracy = getAccuracyMeters();
+  return accuracy && accuracy > TRACKING_ACCURACY_WARNING_METERS ? "warning" : "muted";
+}
+
+function describeTrackingStatus(){
+  if(!geoReference) return {
+    title:"Live GPS unavailable",
+    detail:"Not enough verified caisson GPS points are available to align the drawing.",
+    warning:""
+  };
+  if(trackingState.lastError) return {
+    title:"Live GPS unavailable",
+    detail:trackingState.lastError,
+    warning:"Allow Location Services and Safari location access on the iPhone."
+  };
+  if(trackingState.watchId === null){
+    return {
+      title:"Live GPS is off",
+      detail:"Turn it on to follow your location on the drawing and see the nearest caisson.",
+      warning:""
+    };
+  }
+  if(trackingState.isStarting || !trackingState.current){
+    return {
+      title:"Looking for GPS…",
+      detail:"Stay outside or near the caissons until the phone reports your location.",
+      warning:""
+    };
+  }
+  const nearest = getNearestCaisson(trackingState.current);
+  const accuracy = getAccuracyMeters();
+  const accuracyText = accuracy ? `GPS accuracy ±${formatDistance(accuracy)}` : "GPS accuracy unavailable";
+  return {
+    title:nearest ? `Nearest caisson ${nearest.caisson}` : "Live GPS running",
+    detail:nearest ? `${formatDistance(nearest.distance)} away • ${accuracyText}` : accuracyText,
+    warning:accuracy && accuracy > TRACKING_ACCURACY_WARNING_METERS ? "Accuracy is loose right now, so use the nearest-caisson number as a guide only." : ""
+  };
+}
+
+function updateTrackingUi(){
+  const button = $("trackToggle");
+  const status = $("trackingStatus");
+  const state = describeTrackingStatus();
+  if(button){
+    const isOn = trackingState.watchId !== null || trackingState.isStarting;
+    button.textContent = isOn ? "Stop Live GPS" : "Start Live GPS";
+    button.classList.toggle("on", isOn);
+    button.classList.toggle("secondary", !isOn);
+    button.disabled = !geoReference;
+  }
+  if(status){
+    status.innerHTML = `<strong>${esc(state.title)}</strong><div>${esc(state.detail)}</div>${state.warning ? `<div class="${getAccuracyStatusClass()}">${esc(state.warning)}</div>` : ""}`;
+  }
+}
+
+function ensureTrackingMarker(){
+  const pins = $("pins");
+  if(!pins) return null;
+  let marker = $("liveLocationMarker");
+  if(marker) return marker;
+  marker = document.createElement("div");
+  marker.id = "liveLocationMarker";
+  marker.className = "live-location-marker";
+  marker.hidden = true;
+  marker.innerHTML = '<div class="live-location-accuracy" id="liveLocationAccuracy"></div><div class="live-location-dot"></div>';
+  pins.appendChild(marker);
+  return marker;
+}
+
+function centerMapOnPosition(position){
+  const shell = $("mapShell");
+  const map = $("map");
+  if(!shell || !map || !position) return;
+  const left = map.offsetWidth * position.x / 100 - shell.clientWidth / 2;
+  const top = map.offsetHeight * position.y / 100 - shell.clientHeight / 2;
+  shell.scrollTo({left, top, behavior:trackingState.hasCentered ? "smooth" : "auto"});
+  trackingState.hasCentered = true;
+}
+
+function syncTrackingOverlay(){
+  updateTrackingUi();
+  const marker = ensureTrackingMarker();
+  if(!marker || !trackingState.current || !geoReference){
+    if(marker) marker.hidden = true;
+    return;
+  }
+  const position = gpsToMapPosition(trackingState.current);
+  if(!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)){
+    marker.hidden = true;
+    return;
+  }
+  marker.hidden = false;
+  marker.style.left = `${position.x}%`;
+  marker.style.top = `${position.y}%`;
+  const map = $("map");
+  const accuracyRing = $("liveLocationAccuracy");
+  if(map && accuracyRing && Number.isFinite(trackingState.current.accuracy)){
+    const nearest = getNearestCaisson(trackingState.current);
+    const nearestMapGps = nearest?.estimatedGps;
+    const currentGps = trackingState.current;
+    const offsetDistance = nearestMapGps ? haversineDistance(currentGps, nearestMapGps) : trackingState.current.accuracy;
+    const percentRadius = averageMetersPerPercent > 0 ? trackingState.current.accuracy / averageMetersPerPercent : 0.4;
+    accuracyRing.style.width = `${Math.max(18, map.offsetWidth * percentRadius / 100 * 2)}px`;
+    accuracyRing.style.height = `${Math.max(18, map.offsetWidth * percentRadius / 100 * 2)}px`;
+    accuracyRing.style.opacity = offsetDistance > TRACKING_ACCURACY_WARNING_METERS ? "0.85" : "1";
+  }
+  centerMapOnPosition(position);
+}
+
+function startTracking(){
+  if(!geoReference){
+    updateTrackingUi();
+    return;
+  }
+  if(trackingState.watchId !== null || trackingState.isStarting) return;
+  if(!navigator.geolocation?.watchPosition){
+    trackingState.lastError = "This browser does not support live GPS tracking.";
+    updateTrackingUi();
+    return;
+  }
+  trackingState.lastError = "";
+  trackingState.current = null;
+  trackingState.isStarting = true;
+  trackingState.hasCentered = false;
+  updateTrackingUi();
+  trackingState.watchId = navigator.geolocation.watchPosition(
+    ({coords, timestamp}) => {
+      trackingState.isStarting = false;
+      trackingState.lastError = "";
+      trackingState.current = {
+        lat:coords.latitude,
+        lon:coords.longitude,
+        accuracy:Number.isFinite(coords.accuracy) ? coords.accuracy : null,
+        timestamp:timestamp || Date.now()
+      };
+      syncTrackingOverlay();
+    },
+    error => {
+      trackingState.isStarting = false;
+      trackingState.lastError = error?.code === 1
+        ? "Location permission was denied."
+        : error?.code === 2
+          ? "The phone could not get a GPS fix."
+          : "Live GPS timed out. Try again outside or with a stronger signal.";
+      stopTracking({preserveError:true});
+    },
+    {enableHighAccuracy:true, maximumAge:5000, timeout:15000}
+  );
+}
+
+function stopTracking({preserveError=false} = {}){
+  if(trackingState.watchId !== null && navigator.geolocation?.clearWatch) navigator.geolocation.clearWatch(trackingState.watchId);
+  trackingState.watchId = null;
+  trackingState.isStarting = false;
+  trackingState.current = preserveError ? null : trackingState.current;
+  trackingState.hasCentered = false;
+  if(!preserveError) trackingState.lastError = "";
+  const marker = $("liveLocationMarker");
+  if(marker) marker.hidden = true;
+  updateTrackingUi();
+}
+
+function toggleTracking(){
+  if(trackingState.watchId !== null || trackingState.isStarting) stopTracking();
+  else startTracking();
+}
+
 async function deletePhoto(n, id){
   const db = await dbPromise;
   const tx = db.transaction("photos", "readwrite");
@@ -349,6 +740,7 @@ globalThis.showPhotos = async function(n){
 globalThis.selectCaisson = async function(n){
   selected = n;
   renderPins();
+  syncTrackingOverlay();
   const r = record(n);
   $("panel").innerHTML = `
   <div class="card">
@@ -365,6 +757,7 @@ globalThis.selectCaisson = async function(n){
     <label class="label">Notes</label><textarea id="notes" rows="4">${esc(r.notes||"")}</textarea>
     <label class="label"><input id="verified" type="checkbox" ${r.verified?"checked":""} style="width:auto"> GPS/location verified</label>
     <button id="save">Save Caisson Information</button>
+    <p class="tracking-note">Live GPS can auto-fill a missing location when you add photos, and the blue dot stays on the drawing while you move.</p>
   </div>
   <div class="card">
     <h2 style="font-size:17px">Photos</h2>
@@ -402,10 +795,12 @@ globalThis.selectCaisson = async function(n){
   $("photos").addEventListener("change", () => addPhotos(n));
   await showPhotos(n);
   const spot = HOTSPOTS.find(x=>x.caisson===n);
-  if(spot){
+  if(spot && trackingState.watchId === null){
     const shell = $("mapShell"), map = $("map");
     shell.scrollTo({left:map.offsetWidth*spot.x/100-shell.clientWidth/2,top:map.offsetHeight*spot.y/100-shell.clientHeight/2,behavior:"smooth"});
   }
 };
 
+updateTrackingUi();
 renderPins();
+syncTrackingOverlay();
