@@ -13,7 +13,7 @@ if (!document.getElementById(PHOTO_STYLE_ID)) {
 }
 
 const DEFAULT_RECORD = {status:"No information",verified:false,notes:"",lat:null,lon:null,condition:"",updated:"",photos:[]};
-let photoIdCounter = 0;
+let photoIdCounter = Number(localStorage.getItem("ordCaissonPhotoCounter") || "0");
 
 globalThis.record = function(n){
   const current = records[n];
@@ -206,7 +206,9 @@ globalThis.addPhotos = async function(n){
 
   for(const [index, file] of files.entries()){
     const generatedId = globalThis.crypto?.randomUUID?.();
-    const uniqueId = generatedId || `${Date.now()}-${file.lastModified||0}-${file.size}-${index}-${current.photos.length}-${++photoIdCounter}`;
+    const fallbackCounter = ++photoIdCounter;
+    localStorage.setItem("ordCaissonPhotoCounter", String(photoIdCounter));
+    const uniqueId = generatedId || `${Date.now()}-${fallbackCounter}`;
     const id = `${n}-${uniqueId}`;
     const metadata = await readPhotoMetadata(file);
     if(!gpsToApply && metadata.gps) gpsToApply = metadata.gps;
@@ -222,7 +224,7 @@ globalThis.addPhotos = async function(n){
     current.photos.push(id);
   }
 
-  const needsLocationUpdate = current.lat == null || current.lon == null;
+  const needsLocationUpdate = current.lat === null || current.lon === null;
   if(gpsToApply && needsLocationUpdate){
     current.lat = gpsToApply.lat;
     current.lon = gpsToApply.lon;
@@ -334,9 +336,6 @@ globalThis.selectCaisson = async function(n){
   $("photos").addEventListener("change", () => addPhotos(n));
   await showPhotos(n);
 
-  const latest = record(n);
-  if(latest.lat != null) $("lat").value = latest.lat;
-  if(latest.lon != null) $("lon").value = latest.lon;
 
   const spot = HOTSPOTS.find(x=>x.caisson===n);
   if(spot){
