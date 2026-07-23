@@ -30,7 +30,7 @@ if (!document.getElementById(PHOTO_STYLE_ID)) {
 
 const DEFAULT_RECORD = {status:"No information",verified:false,notes:"",lat:null,lon:null,condition:"",updated:"",photos:[]};
 const pendingPhotoAdds = new Map();
-const TRACKING_ACCURACY_WARNING_METERS = 9; // Warn when GPS drift is about 30 ft, which can put the marker on the wrong caisson.
+const TRACKING_ACCURACY_WARNING_METERS = 9.144; // Warn when GPS drift is about 30 ft, which can put the marker on the wrong caisson.
 const FALLBACK_ACCURACY_RING_PERCENT = 0.4; // Keep the accuracy ring visible even when map scale cannot be estimated yet.
 const EXACT_MATCH_THRESHOLD_METERS = 0.01;
 const MIN_DISTANCE_FOR_WEIGHT = 0.001;
@@ -371,7 +371,7 @@ function gpsToMapPosition(gps){
   let weightedX = 0;
   let weightedY = 0;
   for(const point of ranked){
-    const weight = 1 / Math.max(point.distance, MIN_DISTANCE_FOR_WEIGHT) ** 2; // Prevent near-zero distances from creating unstable weights.
+    const weight = 1 / (Math.max(point.distance, MIN_DISTANCE_FOR_WEIGHT) ** 2); // Prevent near-zero distances from creating unstable weights.
     totalWeight += weight;
     weightedX += point.targetX * weight;
     weightedY += point.targetY * weight;

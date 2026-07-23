@@ -61,7 +61,23 @@ const STARTING={"64":{"lat":41.976,"lon":-87.91239,"verified":true,"status":"Ver
 function loadRecords(){
  try{
   const stored=JSON.parse(localStorage.getItem("ordCaissonRecords")||"null");
-  return stored&&typeof stored==="object"?{...STARTING,...stored}:{...STARTING};
+  if(!stored||typeof stored!=="object") return {...STARTING};
+  const merged={...stored};
+  Object.entries(STARTING).forEach(([caisson,seed])=>{
+   const current=stored[caisson];
+   if(!current||typeof current!=="object"){merged[caisson]={...seed};return;}
+   const hasStoredGps=Number.isFinite(current.lat)&&Number.isFinite(current.lon);
+   merged[caisson]={
+    ...seed,
+    ...current,
+    lat:hasStoredGps?current.lat:seed.lat,
+    lon:hasStoredGps?current.lon:seed.lon,
+    verified:hasStoredGps?current.verified:seed.verified,
+    status:hasStoredGps||current.status&&current.status!=="No information"?current.status:seed.status,
+    notes:current.notes||seed.notes
+   };
+  });
+  return merged;
  }catch{
   return {...STARTING};
  }
