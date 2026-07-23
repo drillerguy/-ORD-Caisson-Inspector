@@ -83,6 +83,17 @@ function getDeviceGps(){
   });
 }
 
+function createPhotoId(n){
+  const generatedId = globalThis.crypto?.randomUUID?.();
+  if(generatedId) return `${n}-${generatedId}`;
+  const bytes = new Uint8Array(16);
+  if(globalThis.crypto?.getRandomValues){
+    globalThis.crypto.getRandomValues(bytes);
+    return `${n}-${Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("")}`;
+  }
+  throw new Error("Secure photo ID generation is not available in this browser.");
+}
+
 function exifDateToIso(value){
   if(!value || typeof value !== "string") return null;
   const match = value.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
@@ -246,9 +257,7 @@ globalThis.addPhotos = async function(n){
     const fallbackGps = !gpsToApply && needsLocationUpdate ? await getDeviceGps() : null;
 
     for(const {file, metadata} of fileEntries){
-      const generatedId = globalThis.crypto?.randomUUID?.();
-      const uniqueId = generatedId || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      const id = `${n}-${uniqueId}`;
+      const id = createPhotoId(n);
       const effectiveGps = metadata.gps || fallbackGps || null;
       if(!gpsToApply && effectiveGps) gpsToApply = effectiveGps;
       store.put({
@@ -358,14 +367,14 @@ globalThis.selectCaisson = async function(n){
   <div class="card">
     <h2 style="font-size:17px">Photos</h2>
     <input id="photos" type="file" accept="image/*" capture="environment" multiple>
-    <p class="tiny" style="margin:8px 0 0">Photos are stored locally when you select them.</p>
+    <p class="tiny" style="margin:8px 0 0">Photos are stored locally after selection is confirmed.</p>
     <div id="photoGrid" class="photo-grid" style="margin-top:10px"></div>
     <p class="tiny">Photos are stored locally on this device in the browser.</p>
   </div>`;
 
   $("save").onclick = async () => {
     const formValues = readCurrentFormValues();
-    await pendingPhotoAdds.get(n);
+    await (pendingPhotoAdds.get(n) || Promise.resolve());
     const current = record(n);
     records[n] = {
       ...current,
