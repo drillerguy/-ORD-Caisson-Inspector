@@ -204,7 +204,8 @@ globalThis.addPhotos = async function(n){
   let gpsToApply = null;
 
   for(const file of files){
-    const id = `${n}-${crypto.randomUUID()}`;
+    const uniqueId = globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const id = `${n}-${uniqueId}`;
     const metadata = await readPhotoMetadata(file);
     if(!gpsToApply && metadata.gps) gpsToApply = metadata.gps;
     store.put({
