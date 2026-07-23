@@ -73,7 +73,7 @@ function loadRecords(){
     lat:hasStoredGps?current.lat:seed.lat,
     lon:hasStoredGps?current.lon:seed.lon,
     verified:hasStoredGps?current.verified:seed.verified,
-    status:hasStoredGps||current.status&&current.status!=="No information"?current.status:seed.status,
+    status:hasStoredGps||(current.status&&current.status!=="No information")?current.status:seed.status,
     notes:current.notes||seed.notes
    };
   });
