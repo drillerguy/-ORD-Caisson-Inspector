@@ -315,8 +315,7 @@ function getDeviceGps(){
 }
 
 function createPhotoId(n){
-  const generatedId = globalThis.crypto?.randomUUID?.();
-  if(generatedId) return `${n}-${generatedId}`;
+  if(globalThis.crypto?.randomUUID) return `${n}-${globalThis.crypto.randomUUID()}`;
   const bytes = new Uint8Array(16);
   if(globalThis.crypto?.getRandomValues){
     globalThis.crypto.getRandomValues(bytes);
@@ -450,7 +449,7 @@ async function readPhotoMetadata(file){
       offset += 2 + size;
     }
   }catch(err){
-    console.warn("Unable to extract EXIF metadata from photo. The photo will still be saved, but automatic GPS coordinates and capture time will not be available. You can enter GPS coordinates in the form if needed.", err);
+    console.warn("Failed to extract EXIF metadata. Photo saved without GPS/timestamp data.", err);
   }
   return {capturedAt:fallbackDate, gps:null};
 }
@@ -772,8 +771,8 @@ globalThis.addPhotos = async function(n){
       let gpsToApply = firstEntryWithGps ? firstEntryWithGps.metadata.gps : null;
       const gpsCapturedAt = firstEntryWithGps?.metadata?.capturedAt || null;
       const hasPhotoWithoutGps = fileEntries.some(({metadata}) => !metadata.gps);
-      const needsDeviceGps = (current.lat === null || current.lon === null) && !gpsToApply && hasPhotoWithoutGps;
-      const fallbackGps = needsDeviceGps ? await getDeviceGps() : null;
+      const shouldRequestDeviceGps = (current.lat === null || current.lon === null) && !gpsToApply && hasPhotoWithoutGps;
+      const fallbackGps = shouldRequestDeviceGps ? await getDeviceGps() : null;
       const newPhotoIds = [];
 
       for(const {file, metadata} of fileEntries){
