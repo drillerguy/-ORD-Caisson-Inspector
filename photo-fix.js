@@ -203,10 +203,9 @@ globalThis.addPhotos = async function(n){
   const current = record(n);
   let gpsToApply = null;
 
-  for(const file of files){
-    const uniqueId = globalThis.crypto?.randomUUID
-      ? crypto.randomUUID()
-      : `${Date.now()}-${performance.now().toString(16).replace(/\./g,"")}-${Math.random().toString(16).slice(2)}-${current.photos.length}`;
+  for(const [index, file] of files.entries()){
+    const generatedId = globalThis.crypto?.randomUUID?.();
+    const uniqueId = generatedId || `${Date.now()}-${performance.now().toString(16).replace(/\./g,"")}-${file.lastModified||0}-${file.size}-${index}-${current.photos.length}`;
     const id = `${n}-${uniqueId}`;
     const metadata = await readPhotoMetadata(file);
     if(!gpsToApply && metadata.gps) gpsToApply = metadata.gps;
@@ -222,7 +221,7 @@ globalThis.addPhotos = async function(n){
     current.photos.push(id);
   }
 
-  if(gpsToApply && (current.lat == null || current.lon == null)){
+  if(gpsToApply && (current.lat === null || current.lat === undefined || current.lon === null || current.lon === undefined)){
     current.lat = gpsToApply.lat;
     current.lon = gpsToApply.lon;
   }
@@ -308,7 +307,7 @@ globalThis.selectCaisson = async function(n){
   <div class="card">
     <h2 style="font-size:17px">Photos</h2>
     <input id="photos" type="file" accept="image/*" multiple>
-    <p class="tiny" style="margin:8px 0 0">Photos are saved immediately after you take or select them.</p>
+    <p class="tiny" style="margin:8px 0 0">Photos are stored locally immediately after you take or select them.</p>
     <div id="photoGrid" class="photo-grid" style="margin-top:10px"></div>
     <p class="tiny">Photos are stored locally on this device in the browser.</p>
   </div>`;
