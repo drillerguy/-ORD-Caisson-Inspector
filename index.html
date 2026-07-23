@@ -158,7 +158,7 @@ $("jump").onclick=()=>{const n=+$("search").value;if(HOTSPOTS.some(x=>x.caisson=
 $("search").addEventListener("keydown",e=>{if(e.key==="Enter")$("jump").click();});
 $("export").onclick=()=>{
  const clean=Object.fromEntries(Object.entries(records).map(([n,r])=>[n,{...r,photoCount:(r.photos||[]).length,photos:undefined}]));
- const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(clean,null,2)],{type:"application/json"}));a.download="ohare-caisson-data.json";a.click();
+ const a=document.createElement("a");const url=URL.createObjectURL(new Blob([JSON.stringify(clean,null,2)],{type:"application/json"}));a.href=url;a.download="ohare-caisson-data.json";a.click();URL.revokeObjectURL(url);
 };
 if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});
 renderPins();
