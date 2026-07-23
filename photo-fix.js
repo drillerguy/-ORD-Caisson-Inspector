@@ -13,6 +13,7 @@ if (!document.getElementById(PHOTO_STYLE_ID)) {
 }
 
 const DEFAULT_RECORD = {status:"No information",verified:false,notes:"",lat:null,lon:null,condition:"",updated:"",photos:[]};
+let photoIdCounter = 0;
 
 globalThis.record = function(n){
   const current = records[n];
@@ -205,7 +206,7 @@ globalThis.addPhotos = async function(n){
 
   for(const [index, file] of files.entries()){
     const generatedId = globalThis.crypto?.randomUUID?.();
-    const uniqueId = generatedId || `${Date.now()}-${performance.now().toString(16).replace(/\./g,"")}-${file.lastModified||0}-${file.size}-${index}-${current.photos.length}`;
+    const uniqueId = generatedId || `${Date.now()}-${file.lastModified||0}-${file.size}-${index}-${current.photos.length}-${++photoIdCounter}`;
     const id = `${n}-${uniqueId}`;
     const metadata = await readPhotoMetadata(file);
     if(!gpsToApply && metadata.gps) gpsToApply = metadata.gps;
@@ -221,7 +222,8 @@ globalThis.addPhotos = async function(n){
     current.photos.push(id);
   }
 
-  if(gpsToApply && (current.lat === null || current.lat === undefined || current.lon === null || current.lon === undefined)){
+  const needsLocationUpdate = current.lat == null || current.lon == null;
+  if(gpsToApply && needsLocationUpdate){
     current.lat = gpsToApply.lat;
     current.lon = gpsToApply.lon;
   }
@@ -307,7 +309,7 @@ globalThis.selectCaisson = async function(n){
   <div class="card">
     <h2 style="font-size:17px">Photos</h2>
     <input id="photos" type="file" accept="image/*" multiple>
-    <p class="tiny" style="margin:8px 0 0">Photos are stored locally immediately after you take or select them.</p>
+    <p class="tiny" style="margin:8px 0 0">Photos are stored locally when you select them.</p>
     <div id="photoGrid" class="photo-grid" style="margin-top:10px"></div>
     <p class="tiny">Photos are stored locally on this device in the browser.</p>
   </div>`;
