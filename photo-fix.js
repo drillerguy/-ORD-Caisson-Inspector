@@ -14,6 +14,7 @@ if (!document.getElementById(PHOTO_STYLE_ID)) {
 
 const DEFAULT_RECORD = {status:"No information",verified:false,notes:"",lat:null,lon:null,condition:"",updated:"",photos:[]};
 let photoIdCounter = Number(localStorage.getItem("ordCaissonPhotoCounter") || "0");
+const pendingPhotoAdds = new Map();
 
 globalThis.record = function(n){
   const current = records[n];
@@ -45,6 +46,42 @@ function describeMetadata(photo){
   parts.push(`<div>GPS: ${gps && Number.isFinite(gps.lat) && Number.isFinite(gps.lon) ? `${formatCoordinate(gps.lat)}, ${formatCoordinate(gps.lon)}` : "Not available"}</div>`);
   if(added) parts.push(`<div>Saved: ${esc(formatStoredDate(added))}</div>`);
   return parts.join("");
+}
+
+function readCurrentFormValues(){
+  return {
+    status:$("status")?.value ?? "No information",
+    lat:numOrNull($("lat")?.value ?? ""),
+    lon:numOrNull($("lon")?.value ?? ""),
+    condition:$("condition")?.value ?? "",
+    notes:$("notes")?.value ?? "",
+    verified:Boolean($("verified")?.checked)
+  };
+}
+
+function applyGpsToInputs(gps){
+  if(!gps || !Number.isFinite(gps.lat) || !Number.isFinite(gps.lon)) return;
+  const latInput = $("lat");
+  const lonInput = $("lon");
+  if(latInput && !latInput.value) latInput.value = String(gps.lat);
+  if(lonInput && !lonInput.value) lonInput.value = String(gps.lon);
+}
+
+function getDeviceGps(){
+  if(!navigator.geolocation?.getCurrentPosition) return Promise.resolve(null);
+  return new Promise(resolve => {
+    navigator.geolocation.getCurrentPosition(
+      ({coords}) => {
+        if(Number.isFinite(coords?.latitude) && Number.isFinite(coords?.longitude)){
+          resolve({lat:coords.latitude, lon:coords.longitude});
+        }else{
+          resolve(null);
+        }
+      },
+      () => resolve(null),
+      {enableHighAccuracy:true, timeout:10000, maximumAge:120000}
+    );
+  });
 }
 
 function exifDateToIso(value){
@@ -195,52 +232,66 @@ async function deletePhoto(n, id){
 }
 
 globalThis.addPhotos = async function(n){
-  const input = $("photos");
-  const files = input ? [...input.files] : [];
-  if(!files.length) return;
-  const db = await dbPromise;
-  const tx = db.transaction("photos", "readwrite");
-  const store = tx.objectStore("photos");
-  const current = record(n);
-  let gpsToApply = null;
+  const job = (async () => {
+    const input = $("photos");
+    const files = input ? [...input.files] : [];
+    if(!files.length) return;
+    const db = await dbPromise;
+    const tx = db.transaction("photos", "readwrite");
+    const store = tx.objectStore("photos");
+    const current = record(n);
+    const needsLocationUpdate = current.lat === null || current.lon === null;
+    current.photos = [...(current.photos || [])];
+    let gpsToApply = null;
+    let fallbackGps;
 
-  for(const [index, file] of files.entries()){
-    const generatedId = globalThis.crypto?.randomUUID?.();
-    const fallbackCounter = ++photoIdCounter;
-    localStorage.setItem("ordCaissonPhotoCounter", String(photoIdCounter));
-    const uniqueId = generatedId || `${Date.now()}-${fallbackCounter}`;
-    const id = `${n}-${uniqueId}`;
-    const metadata = await readPhotoMetadata(file);
-    if(!gpsToApply && metadata.gps) gpsToApply = metadata.gps;
-    store.put({
-      id,
-      caisson:n,
-      name:file.name,
-      type:file.type,
-      blob:file,
-      dateAdded:new Date().toISOString(),
-      metadata
+    for(const file of files){
+      const generatedId = globalThis.crypto?.randomUUID?.();
+      const fallbackCounter = ++photoIdCounter;
+      localStorage.setItem("ordCaissonPhotoCounter", String(photoIdCounter));
+      const uniqueId = generatedId || `${Date.now()}-${fallbackCounter}`;
+      const id = `${n}-${uniqueId}`;
+      const metadata = await readPhotoMetadata(file);
+      if(fallbackGps === undefined && needsLocationUpdate && !metadata.gps) fallbackGps = await getDeviceGps();
+      const effectiveGps = metadata.gps || fallbackGps || null;
+      if(!gpsToApply && effectiveGps) gpsToApply = effectiveGps;
+      store.put({
+        id,
+        caisson:n,
+        name:file.name,
+        type:file.type,
+        blob:file,
+        dateAdded:new Date().toISOString(),
+        metadata:{...metadata, gps:effectiveGps}
+      });
+      current.photos.push(id);
+    }
+
+    if(gpsToApply && needsLocationUpdate){
+      current.lat = gpsToApply.lat;
+      current.lon = gpsToApply.lon;
+      applyGpsToInputs(gpsToApply);
+    }
+    current.updated = new Date().toISOString();
+    records[n] = current;
+    saveRecords();
+
+    await new Promise((resolve, reject)=>{
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
     });
-    current.photos.push(id);
+
+    if(input) input.value = "";
+    if(selected === n) await selectCaisson(n);
+  })();
+
+  pendingPhotoAdds.set(n, job);
+  try{
+    await job;
+  } finally {
+    if(pendingPhotoAdds.get(n) === job) pendingPhotoAdds.delete(n);
   }
-
-  const needsLocationUpdate = current.lat === null || current.lon === null;
-  if(gpsToApply && needsLocationUpdate){
-    current.lat = gpsToApply.lat;
-    current.lon = gpsToApply.lon;
-  }
-  current.updated = new Date().toISOString();
-  records[n] = current;
-  saveRecords();
-
-  await new Promise((resolve, reject)=>{
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
-  });
-
-  if(input) input.value = "";
-  if(selected === n) await selectCaisson(n);
 };
 
 globalThis.showPhotos = async function(n){
@@ -310,22 +361,24 @@ globalThis.selectCaisson = async function(n){
   </div>
   <div class="card">
     <h2 style="font-size:17px">Photos</h2>
-    <input id="photos" type="file" accept="image/*" multiple>
+    <input id="photos" type="file" accept="image/*" capture="environment" multiple>
     <p class="tiny" style="margin:8px 0 0">Photos are stored locally when you select them.</p>
     <div id="photoGrid" class="photo-grid" style="margin-top:10px"></div>
     <p class="tiny">Photos are stored locally on this device in the browser.</p>
   </div>`;
 
-  $("save").onclick = () => {
+  $("save").onclick = async () => {
+    const formValues = readCurrentFormValues();
+    await pendingPhotoAdds.get(n);
     const current = record(n);
     records[n] = {
       ...current,
-      status:$("status").value,
-      lat:numOrNull($("lat").value),
-      lon:numOrNull($("lon").value),
-      condition:$("condition").value,
-      notes:$("notes").value,
-      verified:$("verified").checked,
+      status:formValues.status,
+      lat:formValues.lat,
+      lon:formValues.lon,
+      condition:formValues.condition,
+      notes:formValues.notes,
+      verified:formValues.verified,
       updated:new Date().toISOString(),
       photos:[...(current.photos||[])]
     };
