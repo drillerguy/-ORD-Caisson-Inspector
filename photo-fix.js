@@ -8,6 +8,12 @@ if (!document.getElementById(PHOTO_STYLE_ID)) {
     .photo-meta{margin-top:8px;font-size:12px;color:#4e5965;line-height:1.35;word-break:break-word}
     .photo-meta strong{color:#16202a}
     .photo-delete{margin-top:8px;width:100%;background:#c32727}
+    .gps-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+    .gps-status{font-size:12px;line-height:1.35;color:#12642f}
+    .gps-status.error{color:#a61d24}
+    .gps-detail{margin-top:8px}
+    .gps-detail .value{font-size:13px}
+    .version-label{margin-top:10px;font-size:11px;color:#6b7580;text-align:right}
     .tracking-bar{margin-top:10px;display:flex;gap:8px;align-items:stretch;flex-wrap:wrap}
     .tracking-toggle.on{background:#16803d}
     .tracking-status{flex:1;min-width:220px;background:#ffffff1a;border:1px solid #ffffff2f;border-radius:10px;padding:9px 11px;font-size:12px;line-height:1.4;color:white}
@@ -28,7 +34,7 @@ if (!document.getElementById(PHOTO_STYLE_ID)) {
   document.head.appendChild(style);
 }
 
-const DEFAULT_RECORD = {status:"No information",verified:false,notes:"",lat:null,lon:null,condition:"",updated:"",photos:[]};
+const DEFAULT_RECORD = {status:"No information",verified:false,notes:"",lat:null,lon:null,gpsAccuracyMeters:null,gpsCapturedAt:null,condition:"",updated:"",photos:[]};
 const pendingPhotoAdds = new Map();
 const TRACKING_ACCURACY_WARNING_METERS = 9.144; // Warn when GPS drift is about 30 ft, which can put the marker on the wrong caisson.
 const FALLBACK_ACCURACY_RING_PERCENT = 0.4; // Keep the accuracy ring visible even when map scale cannot be estimated yet.
@@ -36,6 +42,7 @@ const EXACT_MATCH_THRESHOLD_METERS = 0.01;
 const MIN_DISTANCE_FOR_WEIGHT = 0.001;
 const TRACKING_CONTROL_ID = "trackingBar";
 const EARTH_RADIUS_METERS = 6378137;
+const GPS_REPLACEMENT_EPSILON = 0.000001;
 
 const trackingState = {
   watchId:null,
@@ -74,6 +81,10 @@ function formatCoordinate(value){
   return Number.isFinite(value) ? value.toFixed(6) : "";
 }
 
+function formatFeet(value){
+  return Number.isFinite(value) ? `${Math.max(1, Math.round(value * 3.28084))} ft` : "";
+}
+
 function formatDistance(meters){
   if(!Number.isFinite(meters)) return "";
   const feet = meters * 3.28084;
@@ -81,14 +92,25 @@ function formatDistance(meters){
   return `${(meters / 1609.344).toFixed(2)} mi`;
 }
 
+function getPhotoDetails(photo){
+  const latitude = Number.isFinite(photo?.latitude) ? photo.latitude : Number.isFinite(photo?.metadata?.gps?.lat) ? photo.metadata.gps.lat : Number.isFinite(photo?.gps?.lat) ? photo.gps.lat : null;
+  const longitude = Number.isFinite(photo?.longitude) ? photo.longitude : Number.isFinite(photo?.metadata?.gps?.lon) ? photo.metadata.gps.lon : Number.isFinite(photo?.gps?.lon) ? photo.gps.lon : null;
+  return {
+    addedAt:photo?.addedAt || photo?.dateAdded || photo?.date || null,
+    dateTaken:photo?.dateTaken || photo?.metadata?.capturedAt || photo?.capturedAt || null,
+    latitude,
+    longitude
+  };
+}
+
 function describeMetadata(photo){
   const parts = [`<div><strong>${esc(photo.name||"Photo")}</strong></div>`];
-  const taken = photo.metadata?.capturedAt || photo.capturedAt;
-  const gps = photo.metadata?.gps || photo.gps;
-  const added = photo.dateAdded || photo.date;
-  parts.push(`<div>Taken: ${esc(taken ? formatStoredDate(taken) : "Not available")}</div>`);
-  parts.push(`<div>GPS: ${gps && Number.isFinite(gps.lat) && Number.isFinite(gps.lon) ? `${formatCoordinate(gps.lat)}, ${formatCoordinate(gps.lon)}` : "Not available"}</div>`);
-  if(added) parts.push(`<div>Saved: ${esc(formatStoredDate(added))}</div>`);
+  const details = getPhotoDetails(photo);
+  parts.push(`<div>Filename: ${esc(photo.name || "Not available")}</div>`);
+  parts.push(`<div>Date taken: ${esc(details.dateTaken ? formatStoredDate(details.dateTaken) : "Not available")}</div>`);
+  parts.push(`<div>Latitude: ${esc(Number.isFinite(details.latitude) ? formatCoordinate(details.latitude) : "Not available")}</div>`);
+  parts.push(`<div>Longitude: ${esc(Number.isFinite(details.longitude) ? formatCoordinate(details.longitude) : "Not available")}</div>`);
+  parts.push(`<div>Date added: ${esc(details.addedAt ? formatStoredDate(details.addedAt) : "Not available")}</div>`);
   return parts.join("");
 }
 
@@ -97,10 +119,154 @@ function readCurrentFormValues(){
     status:$("status")?.value ?? "No information",
     lat:numOrNull($("lat")?.value ?? ""),
     lon:numOrNull($("lon")?.value ?? ""),
+    gpsAccuracyMeters:numOrNull($("gpsAccuracyMeters")?.value ?? ""),
+    gpsCapturedAt:$("gpsCapturedAt")?.value ?? "",
     condition:$("condition")?.value ?? "",
     notes:$("notes")?.value ?? "",
     verified:Boolean($("verified")?.checked)
   };
+}
+
+function updateSelectedBadge(verified){
+  const badge = $("selectedCaissonBadge");
+  if(!badge) return;
+  badge.className = `badge ${verified ? "green" : "gray"}`;
+  badge.textContent = verified ? "Verified location" : "Not verified";
+}
+
+function setGpsMessage(message, isError = false){
+  const status = $("gpsMessage");
+  if(!status) return;
+  status.hidden = !message;
+  status.classList.toggle("error", Boolean(message) && isError);
+  status.textContent = message || "";
+}
+
+function updateGpsDetailRow(id, value){
+  const row = $(id);
+  if(!row) return;
+  row.hidden = !value;
+  const display = row.querySelector(".value");
+  if(display) display.textContent = value || "";
+}
+
+function refreshGpsDetails(){
+  const values = readCurrentFormValues();
+  updateGpsDetailRow("gpsAccuracyRow", Number.isFinite(values.gpsAccuracyMeters) ? formatFeet(values.gpsAccuracyMeters) : "");
+  updateGpsDetailRow("gpsCapturedAtRow", values.gpsCapturedAt ? formatStoredDate(values.gpsCapturedAt) : "");
+}
+
+function setGpsFields({lat=null, lon=null, gpsAccuracyMeters=null, gpsCapturedAt="", verified=false, force=false} = {}){
+  const latInput = $("lat");
+  const lonInput = $("lon");
+  const accuracyInput = $("gpsAccuracyMeters");
+  const capturedAtInput = $("gpsCapturedAt");
+  const verifiedInput = $("verified");
+  if(latInput && (force || !latInput.value)) latInput.value = lat === null ? "" : String(lat);
+  if(lonInput && (force || !lonInput.value)) lonInput.value = lon === null ? "" : String(lon);
+  if(accuracyInput) accuracyInput.value = Number.isFinite(gpsAccuracyMeters) ? String(gpsAccuracyMeters) : "";
+  if(capturedAtInput) capturedAtInput.value = gpsCapturedAt || "";
+  if(verifiedInput && verified) verifiedInput.checked = true;
+  updateSelectedBadge(Boolean(verifiedInput?.checked));
+  refreshGpsDetails();
+}
+
+function saveCaissonForm(n, overrides = {}){
+  const current = record(n);
+  const formValues = readCurrentFormValues();
+  records[n] = {
+    ...current,
+    status:overrides.status ?? formValues.status,
+    lat:Object.prototype.hasOwnProperty.call(overrides, "lat") ? overrides.lat : formValues.lat,
+    lon:Object.prototype.hasOwnProperty.call(overrides, "lon") ? overrides.lon : formValues.lon,
+    gpsAccuracyMeters:Object.prototype.hasOwnProperty.call(overrides, "gpsAccuracyMeters") ? overrides.gpsAccuracyMeters : (formValues.gpsAccuracyMeters ?? current.gpsAccuracyMeters ?? null),
+    gpsCapturedAt:Object.prototype.hasOwnProperty.call(overrides, "gpsCapturedAt") ? overrides.gpsCapturedAt : (formValues.gpsCapturedAt || current.gpsCapturedAt || null),
+    condition:overrides.condition ?? formValues.condition,
+    notes:overrides.notes ?? formValues.notes,
+    verified:Object.prototype.hasOwnProperty.call(overrides, "verified") ? overrides.verified : formValues.verified,
+    updated:new Date().toISOString(),
+    photos:[...(current.photos || [])]
+  };
+  saveRecords();
+  return records[n];
+}
+
+function describeLocationError(error){
+  if(error?.code === 1) return "Location permission was denied. Please allow location access and try again.";
+  if(error?.code === 2) return "Your device could not determine a location. Move to an open area and try again.";
+  if(error?.code === 3) return "GPS request timed out after 15 seconds. Try again outside or with a stronger signal.";
+  return "Unable to retrieve your current GPS location. Please try again.";
+}
+
+function requestCurrentPosition(options){
+  if(!navigator.geolocation?.getCurrentPosition){
+    return Promise.reject(new Error("This browser does not support GPS location."));
+  }
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, options);
+  });
+}
+
+function sameGps(aLat, aLon, bLat, bLon){
+  return Number.isFinite(aLat) && Number.isFinite(aLon) && Number.isFinite(bLat) && Number.isFinite(bLon)
+    && Math.abs(aLat - bLat) <= GPS_REPLACEMENT_EPSILON
+    && Math.abs(aLon - bLon) <= GPS_REPLACEMENT_EPSILON;
+}
+
+function getDisplayedGpsFallback(n){
+  const current = record(n);
+  const latInput = $("lat");
+  const lonInput = $("lon");
+  return {
+    lat:latInput ? numOrNull(latInput.value) : current.lat,
+    lon:lonInput ? numOrNull(lonInput.value) : current.lon
+  };
+}
+
+function applyGpsToInputs(gps, {force=false} = {}){
+  if(!gps || !Number.isFinite(gps.lat) || !Number.isFinite(gps.lon)) return;
+  const latInput = $("lat");
+  const lonInput = $("lon");
+  if(latInput && (force || !latInput.value)) latInput.value = String(gps.lat);
+  if(lonInput && (force || !lonInput.value)) lonInput.value = String(gps.lon);
+}
+
+function shouldApplyIncomingGps(n, gps){
+  if(!gps || !Number.isFinite(gps.lat) || !Number.isFinite(gps.lon)) return false;
+  const existing = getDisplayedGpsFallback(n);
+  const isMissing = existing.lat === null || existing.lon === null;
+  if(isMissing) return true;
+  if(sameGps(existing.lat, existing.lon, gps.lat, gps.lon)) return true;
+  return confirm(`Replace the current GPS coordinates with photo GPS?\n\nCurrent: ${formatCoordinate(existing.lat)}, ${formatCoordinate(existing.lon)}\nPhoto: ${formatCoordinate(gps.lat)}, ${formatCoordinate(gps.lon)}`);
+}
+
+async function useCurrentGps(n){
+  const button = $("useCurrentGps");
+  if(button) {
+    button.disabled = true;
+    button.textContent = "Getting GPS…";
+  }
+  setGpsMessage("");
+  try{
+    const position = await requestCurrentPosition({enableHighAccuracy:true, timeout:15000, maximumAge:0});
+    const lat = Number.isFinite(position?.coords?.latitude) ? position.coords.latitude : null;
+    const lon = Number.isFinite(position?.coords?.longitude) ? position.coords.longitude : null;
+    const gpsAccuracyMeters = Number.isFinite(position?.coords?.accuracy) ? position.coords.accuracy : null;
+    const gpsCapturedAt = new Date(position?.timestamp || Date.now()).toISOString();
+    if(lat === null || lon === null) throw new Error("Location coordinates were missing from the GPS response.");
+    setGpsFields({lat, lon, gpsAccuracyMeters, gpsCapturedAt, verified:true, force:true});
+    saveCaissonForm(n, {lat, lon, gpsAccuracyMeters, gpsCapturedAt, verified:true});
+    setGpsMessage(`GPS captured — accuracy ${formatFeet(gpsAccuracyMeters) || "unavailable"}`);
+  }catch(error){
+    const message = error?.code ? describeLocationError(error) : (error?.message || "Unable to retrieve your current GPS location. Please try again.");
+    setGpsMessage(message, true);
+    alert(message);
+  }finally{
+    if(button){
+      button.disabled = false;
+      button.textContent = "Use Current GPS";
+    }
+  }
 }
 
 function ensureTrackingControls(){
@@ -117,14 +283,6 @@ function ensureTrackingControls(){
     </div>`;
   header.appendChild(bar);
   $("trackToggle")?.addEventListener("click", toggleTracking);
-}
-
-function applyGpsToInputs(gps){
-  if(!gps || !Number.isFinite(gps.lat) || !Number.isFinite(gps.lon)) return;
-  const latInput = $("lat");
-  const lonInput = $("lon");
-  if(latInput && !latInput.value) latInput.value = String(gps.lat);
-  if(lonInput && !lonInput.value) lonInput.value = String(gps.lon);
 }
 
 function getTrackedGps(){
@@ -148,7 +306,7 @@ function getDeviceGps(){
         }
       },
       () => resolve(null),
-      {enableHighAccuracy:true, timeout:10000, maximumAge:120000}
+      {enableHighAccuracy:true, timeout:15000, maximumAge:0}
     );
   });
 }
@@ -578,6 +736,7 @@ function toggleTracking(){
 }
 
 async function deletePhoto(n, id){
+  if(!confirm("Delete this photo?")) return;
   const db = await dbPromise;
   const tx = db.transaction("photos", "readwrite");
   tx.objectStore("photos").delete(id);
@@ -599,52 +758,88 @@ globalThis.addPhotos = async function(n){
     const input = $("photos");
     const files = input ? [...input.files] : [];
     if(!files.length) return;
-    const db = await dbPromise;
-    const tx = db.transaction("photos", "readwrite");
-    const store = tx.objectStore("photos");
-    const current = record(n);
-    const isLocationMissing = current.lat === null || current.lon === null;
-    current.photos = [...(current.photos || [])];
-    const fileEntries = await Promise.all(files.map(async file => ({file, metadata:await readPhotoMetadata(file)})));
-    const firstEntryWithGps = fileEntries.find(({metadata}) => metadata.gps);
-    let gpsToApply = firstEntryWithGps ? firstEntryWithGps.metadata.gps : null;
-    const hasPhotoWithoutGps = fileEntries.some(({metadata}) => !metadata.gps);
-    const needsDeviceGps = isLocationMissing && !gpsToApply && hasPhotoWithoutGps;
-    const fallbackGps = needsDeviceGps ? await getDeviceGps() : null;
+    try{
+      const db = await dbPromise;
+      const tx = db.transaction("photos", "readwrite");
+      const store = tx.objectStore("photos");
+      const current = record(n);
+      const usedIds = new Set(current.photos || []);
+      const fileEntries = await Promise.all(files.map(async file => ({file, metadata:await readPhotoMetadata(file)})));
+      const firstEntryWithGps = fileEntries.find(({metadata}) => metadata.gps);
+      let gpsToApply = firstEntryWithGps ? firstEntryWithGps.metadata.gps : null;
+      const gpsCapturedAt = firstEntryWithGps?.metadata?.capturedAt || null;
+      const hasPhotoWithoutGps = fileEntries.some(({metadata}) => !metadata.gps);
+      const needsDeviceGps = (current.lat === null || current.lon === null) && !gpsToApply && hasPhotoWithoutGps;
+      const fallbackGps = needsDeviceGps ? await getDeviceGps() : null;
+      const newPhotoIds = [];
 
-    for(const {file, metadata} of fileEntries){
-      const id = createPhotoId(n);
-      const effectiveGps = metadata.gps || fallbackGps || null;
-      if(!gpsToApply && effectiveGps) gpsToApply = effectiveGps;
-      store.put({
-        id,
-        caisson:n,
-        name:file.name,
-        type:file.type,
-        blob:file,
-        dateAdded:new Date().toISOString(),
-        metadata:{...metadata, gps:effectiveGps}
+      for(const {file, metadata} of fileEntries){
+        let id = createPhotoId(n);
+        while(usedIds.has(id)) id = createPhotoId(n);
+        usedIds.add(id);
+        const effectiveGps = metadata.gps || fallbackGps || null;
+        if(!gpsToApply && effectiveGps) gpsToApply = effectiveGps;
+        const addedAt = new Date().toISOString();
+        store.put({
+          id,
+          caisson:n,
+          name:file.name,
+          type:file.type,
+          blob:file,
+          addedAt,
+          dateAdded:addedAt,
+          dateTaken:metadata.capturedAt || null,
+          latitude:Number.isFinite(effectiveGps?.lat) ? effectiveGps.lat : null,
+          longitude:Number.isFinite(effectiveGps?.lon) ? effectiveGps.lon : null,
+          metadata:{capturedAt:metadata.capturedAt || null, gps:effectiveGps}
+        });
+        newPhotoIds.push(id);
+      }
+
+      await new Promise((resolve, reject)=>{
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
       });
-      current.photos.push(id);
+
+      const latest = record(n);
+      const mergedPhotoIds = [...(latest.photos || [])];
+      for(const id of newPhotoIds){
+        if(!mergedPhotoIds.includes(id)) mergedPhotoIds.push(id);
+      }
+      records[n] = {
+        ...latest,
+        updated:new Date().toISOString(),
+        photos:mergedPhotoIds
+      };
+
+      if(gpsToApply && shouldApplyIncomingGps(n, gpsToApply)){
+        records[n].lat = gpsToApply.lat;
+        records[n].lon = gpsToApply.lon;
+        records[n].verified = true;
+        if(gpsCapturedAt) records[n].gpsCapturedAt = gpsCapturedAt;
+        if(selected === n){
+          setGpsFields({
+            lat:gpsToApply.lat,
+            lon:gpsToApply.lon,
+            gpsAccuracyMeters:records[n].gpsAccuracyMeters ?? null,
+            gpsCapturedAt:records[n].gpsCapturedAt || "",
+            verified:true,
+            force:true
+          });
+          setGpsMessage(gpsCapturedAt ? "Photo GPS applied from EXIF metadata." : "Photo GPS applied.");
+        }
+      }
+
+      saveRecords();
+      if(selected === n) await selectCaisson(n);
+    }catch(err){
+      console.error("Unable to save photos", err);
+      alert(`Unable to save photo storage: ${err?.message || "Unknown error"}. Please try again.`);
+      throw err;
+    }finally{
+      if(input) input.value = "";
     }
-
-    if(gpsToApply && isLocationMissing){
-      current.lat = gpsToApply.lat;
-      current.lon = gpsToApply.lon;
-      applyGpsToInputs(gpsToApply);
-    }
-    current.updated = new Date().toISOString();
-    records[n] = current;
-    saveRecords();
-
-    await new Promise((resolve, reject)=>{
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    });
-
-    if(input) input.value = "";
-    if(selected === n) await selectCaisson(n);
   })();
 
   pendingPhotoAdds.set(n, job);
@@ -692,7 +887,7 @@ globalThis.showPhotos = async function(n){
 
     const button = document.createElement("button");
     button.className = "photo-delete";
-    button.textContent = "Delete";
+    button.textContent = "Delete Photo";
     button.onclick = () => deletePhoto(n, photo.id);
     card.appendChild(button);
 
@@ -708,7 +903,7 @@ globalThis.selectCaisson = async function(n){
   $("panel").innerHTML = `
   <div class="card">
     <h2>Caisson ${n}</h2>
-    <span class="badge ${r.verified?"green":"gray"}">${r.verified?"Verified location":"Not verified"}</span>
+    <span id="selectedCaissonBadge" class="badge ${r.verified?"green":"gray"}">${r.verified?"Verified location":"Not verified"}</span>
     <label class="label">Status</label><select id="status">
      ${["No information","Verified GPS","Needs review","Repair required","Accepted","Backfilled"].map(x=>`<option ${r.status===x?"selected":""}>${x}</option>`).join("")}
     </select>
@@ -716,42 +911,47 @@ globalThis.selectCaisson = async function(n){
      <div><label class="label">Latitude</label><input id="lat" type="number" step="any" value="${r.lat??""}"></div>
      <div><label class="label">Longitude</label><input id="lon" type="number" step="any" value="${r.lon??""}"></div>
     </div>
+    <input id="gpsAccuracyMeters" type="hidden" value="${Number.isFinite(r.gpsAccuracyMeters) ? r.gpsAccuracyMeters : ""}">
+    <input id="gpsCapturedAt" type="hidden" value="${esc(r.gpsCapturedAt || "")}">
+    <div class="gps-actions">
+     <button id="useCurrentGps" type="button">Use Current GPS</button>
+     <div id="gpsMessage" class="gps-status" hidden></div>
+    </div>
+    <div id="gpsAccuracyRow" class="gps-detail" ${Number.isFinite(r.gpsAccuracyMeters) ? "" : "hidden"}>
+     <div class="label">Accuracy</div>
+     <div class="value">${Number.isFinite(r.gpsAccuracyMeters) ? formatFeet(r.gpsAccuracyMeters) : ""}</div>
+    </div>
+    <div id="gpsCapturedAtRow" class="gps-detail" ${r.gpsCapturedAt ? "" : "hidden"}>
+     <div class="label">GPS captured</div>
+     <div class="value">${r.gpsCapturedAt ? esc(formatStoredDate(r.gpsCapturedAt)) : ""}</div>
+    </div>
     <label class="label">Condition / work stage</label><input id="condition" value="${esc(r.condition||"")}" placeholder="Excavated, standing water, repair...">
     <label class="label">Notes</label><textarea id="notes" rows="4">${esc(r.notes||"")}</textarea>
     <label class="label"><input id="verified" type="checkbox" ${r.verified?"checked":""} style="width:auto"> GPS/location verified</label>
     <button id="save">Save Caisson Information</button>
     <p class="tracking-note">Photo saves can still pull device GPS automatically, and the Start Live GPS button at the top of the page turns on the blue position marker with its accuracy ring.</p>
+    <div class="version-label">Version 1.3 — GPS and Photo Fix</div>
   </div>
   <div class="card">
     <h2 style="font-size:17px">Photos</h2>
     <input id="photos" type="file" accept="image/*" capture="environment" multiple>
-    <p class="tiny" style="margin:8px 0 0">Photos are stored locally after selection is confirmed.</p>
+    <p class="tiny" style="margin:8px 0 0">Photos save locally as soon as you select them.</p>
     <div id="photoGrid" class="photo-grid" style="margin-top:10px"></div>
     <p class="tiny">Photos are stored locally on this device in the browser.</p>
   </div>`;
 
+  $("useCurrentGps").onclick = () => useCurrentGps(n);
+  $("verified")?.addEventListener("change", event => updateSelectedBadge(Boolean(event.target?.checked)));
+  refreshGpsDetails();
   $("save").onclick = async () => {
-    const formValues = readCurrentFormValues();
     try{
-      await (pendingPhotoAdds.get(n) || Promise.resolve());
+     await (pendingPhotoAdds.get(n) || Promise.resolve());
     }catch(err){
       console.error("Unable to finish saving photos", err);
       alert(`Unable to complete photo addition: ${err?.message || "Unknown error"}. Please try adding the photo again.`);
       return;
     }
-    const current = record(n);
-    records[n] = {
-      ...current,
-      status:formValues.status,
-      lat:formValues.lat,
-      lon:formValues.lon,
-      condition:formValues.condition,
-      notes:formValues.notes,
-      verified:formValues.verified,
-      updated:new Date().toISOString(),
-      photos:[...(current.photos||[])]
-    };
-    saveRecords();
+    saveCaissonForm(n);
     selectCaisson(n);
   };
 
