@@ -1,5 +1,5 @@
-const CACHE='ord-caisson-drawing-v2';
-const ASSETS=['./','./index.html','./manifest.webmanifest','./caisson-plan.png','./photo-fix.js'];
+const CACHE='ord-caisson-drawing-v3';
+const ASSETS=['./','./index.html','./manifest.webmanifest','./assets/caisson-plan.png','./photo-fix.js'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',event=>{

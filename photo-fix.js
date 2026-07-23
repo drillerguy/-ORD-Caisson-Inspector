@@ -222,7 +222,7 @@ globalThis.addPhotos = async function(n){
     current.photos.push(id);
   }
 
-  if(gpsToApply && ((current.lat === null || current.lat === undefined) || (current.lon === null || current.lon === undefined))){
+  if(gpsToApply && (current.lat == null || current.lon == null)){
     current.lat = gpsToApply.lat;
     current.lon = gpsToApply.lon;
   }
