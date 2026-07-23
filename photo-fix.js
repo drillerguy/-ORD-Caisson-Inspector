@@ -36,7 +36,7 @@ if (!document.getElementById(PHOTO_STYLE_ID)) {
 
 const DEFAULT_RECORD = {status:"No information",verified:false,notes:"",lat:null,lon:null,gpsAccuracyMeters:null,gpsCapturedAt:null,condition:"",updated:"",photos:[]};
 const pendingPhotoAdds = new Map();
-const TRACKING_ACCURACY_WARNING_METERS = 9.144; // Warn when GPS drift exceeds 30 ft (9.144m), which can put the marker on the wrong caisson.
+const TRACKING_ACCURACY_WARNING_METERS = 9.144; // Warn when GPS accuracy exceeds 30 ft (9.144m), which can put the marker on the wrong caisson.
 const FALLBACK_ACCURACY_RING_PERCENT = 0.4; // Keep the accuracy ring visible even when map scale cannot be estimated yet.
 const EXACT_MATCH_THRESHOLD_METERS = 0.01;
 const MIN_DISTANCE_FOR_WEIGHT = 0.001;
@@ -175,7 +175,6 @@ function setGpsFields({lat=null, lon=null, gpsAccuracyMeters=null, gpsCapturedAt
 async function saveCaissonForm(n, overrides = {}){
   await (pendingPhotoAdds.get(n) || Promise.resolve());
   const current = record(n);
-  const latestPhotos = [...new Set([...(current.photos || []), ...(records[n]?.photos || [])])];
   const formValues = readCurrentFormValues();
   records[n] = {
     ...current,
@@ -188,7 +187,7 @@ async function saveCaissonForm(n, overrides = {}){
     notes:overrides.notes ?? formValues.notes,
     verified:Object.prototype.hasOwnProperty.call(overrides, "verified") ? overrides.verified : formValues.verified,
     updated:new Date().toISOString(),
-    photos:latestPhotos
+    photos:[...(current.photos || [])]
   };
   saveRecords();
   return records[n];
@@ -805,10 +804,9 @@ globalThis.addPhotos = async function(n){
       });
 
       const latest = record(n);
-      const mergedPhotoIds = [...(latest.photos || [])];
-      for(const id of newPhotoIds){
-        if(!mergedPhotoIds.includes(id)) mergedPhotoIds.push(id);
-      }
+      const photoSet = new Set(latest.photos || []);
+      newPhotoIds.forEach(id => photoSet.add(id));
+      const mergedPhotoIds = Array.from(photoSet);
       records[n] = {
         ...latest,
         updated:new Date().toISOString(),
