@@ -91,7 +91,7 @@ function createPhotoId(n){
     globalThis.crypto.getRandomValues(bytes);
     return `${n}-${Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("")}`;
   }
-  throw new Error("Unable to generate photo ID: secure browser crypto APIs are unavailable.");
+  throw new Error("Unable to generate photo ID: this browser does not support secure random number generation. Please use a modern browser.");
 }
 
 function exifDateToIso(value){
@@ -219,7 +219,7 @@ async function readPhotoMetadata(file){
       offset += 2 + size;
     }
   }catch(err){
-    console.warn("Unable to read photo metadata", err);
+    console.warn("Unable to read photo metadata. Photo will be saved without EXIF data.", err);
   }
   return {capturedAt:fallbackDate, gps:null};
 }
@@ -380,7 +380,7 @@ globalThis.selectCaisson = async function(n){
       await (pendingPhotoAdds.get(n) || Promise.resolve());
     }catch(err){
       console.error("Unable to finish saving photos", err);
-      alert("The photo could not be saved. Please try adding it again.");
+      alert(`Unable to save photo: ${err?.message || "Unknown error"}. Please try adding it again.`);
       return;
     }
     const current = record(n);
