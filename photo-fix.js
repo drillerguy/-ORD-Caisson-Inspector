@@ -30,8 +30,10 @@ if (!document.getElementById(PHOTO_STYLE_ID)) {
 
 const DEFAULT_RECORD = {status:"No information",verified:false,notes:"",lat:null,lon:null,condition:"",updated:"",photos:[]};
 const pendingPhotoAdds = new Map();
-const TRACKING_ACCURACY_WARNING_METERS = 9; // Warn when GPS drift is ~30 ft, which can put the marker on the wrong caisson.
+const TRACKING_ACCURACY_WARNING_METERS = 9; // Warn when GPS drift is approximately 30 ft, which can put the marker on the wrong caisson.
 const FALLBACK_ACCURACY_RING_PERCENT = 0.4; // Keep the accuracy ring visible even when map scale cannot be estimated yet.
+const EXACT_MATCH_THRESHOLD_METERS = 0.01;
+const MIN_DISTANCE_FOR_WEIGHT = 0.001;
 const TRACKING_CONTROL_ID = "trackingBar";
 const EARTH_RADIUS_METERS = 6378137;
 
@@ -159,7 +161,7 @@ function createPhotoId(n){
     globalThis.crypto.getRandomValues(bytes);
     return `${n}-${Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("")}`;
   }
-  throw new Error("Unable to generate photo ID: this browser does not support the required security features. Please update your browser.");
+  throw new Error("Unable to generate photo ID: this browser does not support the required security features.");
 }
 
 function exifDateToIso(value){
@@ -287,7 +289,7 @@ async function readPhotoMetadata(file){
       offset += 2 + size;
     }
   }catch(err){
-    console.warn("Unable to extract EXIF metadata from photo. The photo will still be saved, but automatic GPS coordinates and capture time will not be available.", err);
+    console.warn("Unable to extract EXIF metadata from photo. The photo will still be saved, but automatic GPS coordinates and capture time will not be available. You can enter GPS coordinates in the form if needed.", err);
   }
   return {capturedAt:fallbackDate, gps:null};
 }
@@ -364,12 +366,12 @@ function gpsToMapPosition(gps){
     .sort((a, b) => a.distance - b.distance)
     .slice(0, Math.min(6, geoReference.controlPoints.length));
   if(!ranked.length) return null;
-  if(ranked[0].distance < 0.01) return {x:ranked[0].targetX, y:ranked[0].targetY};
+  if(ranked[0].distance < EXACT_MATCH_THRESHOLD_METERS) return {x:ranked[0].targetX, y:ranked[0].targetY};
   let totalWeight = 0;
   let weightedX = 0;
   let weightedY = 0;
   for(const point of ranked){
-    const weight = 1 / Math.max(point.distance, 0.001) ** 2; // Prevent near-zero distances from creating unstable weights.
+    const weight = 1 / Math.max(point.distance, MIN_DISTANCE_FOR_WEIGHT) ** 2; // Prevent near-zero distances from creating unstable weights.
     totalWeight += weight;
     weightedX += point.targetX * weight;
     weightedY += point.targetY * weight;
@@ -716,7 +718,7 @@ globalThis.selectCaisson = async function(n){
     <label class="label">Notes</label><textarea id="notes" rows="4">${esc(r.notes||"")}</textarea>
     <label class="label"><input id="verified" type="checkbox" ${r.verified?"checked":""} style="width:auto"> GPS/location verified</label>
     <button id="save">Save Caisson Information</button>
-    <p class="tracking-note">Photo saves can still pull device GPS automatically, and the Start Live GPS button in the header turns on the blue position marker with its accuracy ring.</p>
+    <p class="tracking-note">Photo saves can still pull device GPS automatically, and the Start Live GPS button at the top of the page turns on the blue position marker with its accuracy ring.</p>
   </div>
   <div class="card">
     <h2 style="font-size:17px">Photos</h2>
