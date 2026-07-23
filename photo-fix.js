@@ -65,7 +65,7 @@ globalThis.record = function(n){
 };
 
 globalThis.saveRecords = function(){
-  localStorage.setItem("ordCaissonRecords", JSON.stringify(records));
+  localStorage.setItem("ohareCaissonRecords", JSON.stringify(records));
   refreshGeoReference();
   renderPins();
   syncTrackingOverlay();

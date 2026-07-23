@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#083a73">
 <link rel="manifest" href="manifest.webmanifest">
-<title>ORD Caisson Drawing</title>
+<title>O'Hare Caisson Drawing</title>
 <style>
 :root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#eef2f6;color:#15202b}
 *{box-sizing:border-box}body{margin:0}
@@ -39,7 +39,7 @@ button.secondary{background:#e6edf5;color:#16202a}.layout{display:grid;grid-temp
 </head>
 <body>
 <header>
-<h1>ORD Caisson Drawing</h1>
+<h1>O'Hare Caisson Drawing</h1>
 <p>Tap a numbered caisson to open its GPS, status, notes, and photos.</p>
 <div class="toolbar">
 <input id="search" type="number" inputmode="numeric" placeholder="Jump to caisson number">
@@ -60,7 +60,7 @@ const HOTSPOTS=[{"caisson":57,"x":23.13188858974127,"y":55.29193348354764},{"cai
 const STARTING={"64":{"lat":41.976,"lon":-87.91239,"verified":true,"status":"Verified GPS","notes":"Field control point."},"65":{"lat":41.97697,"lon":-87.91079,"verified":true,"status":"Verified GPS","notes":"Corrected field control point."},"66":{"lat":41.97623,"lon":-87.91258,"verified":true,"status":"Verified GPS","notes":"Field control point."},"67":{"lat":41.97644,"lon":-87.91267,"verified":true,"status":"Verified GPS","notes":"Field control point."},"68":{"lat":41.97633,"lon":-87.9126,"verified":true,"status":"Verified GPS","notes":"Field control point; one uploaded photo showed a visible green 68 marking."},"73":{"lat":41.97604,"lon":-87.9124,"verified":true,"status":"Verified GPS","notes":"Field control point."},"75":{"lat":41.97607,"lon":-87.91223,"verified":true,"status":"Verified GPS","notes":"Field control point."},"77":{"lat":41.97603,"lon":-87.91235,"verified":true,"status":"Verified GPS","notes":"Field control point."},"110":{"lat":41.97643,"lon":-87.91247,"verified":true,"status":"Verified GPS","notes":"Corrected field coordinate."},"113":{"lat":41.97655,"lon":-87.91246,"verified":true,"status":"Verified GPS","notes":"Corrected from earlier mistaken label."},"120":{"lat":41.97634,"lon":-87.91248,"verified":true,"status":"Verified GPS","notes":"Field control point."},"124":{"lat":41.97635,"lon":-87.91232,"verified":true,"status":"Verified GPS","notes":"Field control point."},"128":{"lat":41.97635,"lon":-87.91219,"verified":true,"status":"Verified GPS","notes":"Field control point."},"129":{"lat":41.97636,"lon":-87.91216,"verified":true,"status":"Verified GPS","notes":"Successfully predicted from GPS and confirmed by user."},"130":{"lat":41.97632,"lon":-87.91212,"verified":true,"status":"Verified GPS","notes":"Field control point."},"154":{"lat":41.97648,"lon":-87.91257,"verified":true,"status":"Verified GPS","notes":"Field control point."},"196":{"lat":41.97655,"lon":-87.91211,"verified":true,"status":"Verified GPS","notes":"Field control point."},"205":{"lat":41.97647,"lon":-87.91199,"verified":true,"status":"Verified GPS","notes":"Field control point."}};
 function loadRecords(){
  try{
-  const stored=JSON.parse(localStorage.getItem("ordCaissonRecords") ?? "null");
+  const stored=JSON.parse(localStorage.getItem("ohareCaissonRecords") ?? "null");
   if(!stored||typeof stored!=="object") return {...STARTING};
   const merged={...stored};
   Object.entries(STARTING).forEach(([caisson,seed])=>{
@@ -87,11 +87,11 @@ let records=loadRecords();
 let selected=null;
 const $=id=>document.getElementById(id);
 const dbPromise=new Promise((resolve,reject)=>{
- const req=indexedDB.open("ordCaissonPhotos",1);
+ const req=indexedDB.open("ohareCaissonPhotos",1);
  req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains("photos"))req.result.createObjectStore("photos",{keyPath:"id"});}
  req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
 });
-function saveRecords(){localStorage.setItem("ordCaissonRecords",JSON.stringify(records));renderPins();}
+function saveRecords(){localStorage.setItem("ohareCaissonRecords",JSON.stringify(records));renderPins();}
 function record(n){return records[n]||{status:"No information",verified:false,notes:"",lat:null,lon:null,condition:"",updated:"",photos:[]};}
 function renderPins(){
  $("pins").innerHTML=HOTSPOTS.map(h=>{
@@ -158,7 +158,7 @@ $("jump").onclick=()=>{const n=+$("search").value;if(HOTSPOTS.some(x=>x.caisson=
 $("search").addEventListener("keydown",e=>{if(e.key==="Enter")$("jump").click();});
 $("export").onclick=()=>{
  const clean=Object.fromEntries(Object.entries(records).map(([n,r])=>[n,{...r,photoCount:(r.photos||[]).length,photos:undefined}]));
- const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(clean,null,2)],{type:"application/json"}));a.download="ORD-caisson-data.json";a.click();
+ const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(clean,null,2)],{type:"application/json"}));a.download="ohare-caisson-data.json";a.click();
 };
 if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});
 renderPins();
