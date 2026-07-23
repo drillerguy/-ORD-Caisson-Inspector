@@ -30,7 +30,7 @@ if (!document.getElementById(PHOTO_STYLE_ID)) {
 
 const DEFAULT_RECORD = {status:"No information",verified:false,notes:"",lat:null,lon:null,condition:"",updated:"",photos:[]};
 const pendingPhotoAdds = new Map();
-const TRACKING_ACCURACY_WARNING_METERS = 9; // Warn when GPS drift is approximately 30 ft, which can put the marker on the wrong caisson.
+const TRACKING_ACCURACY_WARNING_METERS = 9; // Warn when GPS drift is ~30 ft, which can put the marker on the wrong caisson.
 const FALLBACK_ACCURACY_RING_PERCENT = 0.4; // Keep the accuracy ring visible even when map scale cannot be estimated yet.
 const TRACKING_CONTROL_ID = "trackingBar";
 const EARTH_RADIUS_METERS = 6378137;
@@ -369,7 +369,7 @@ function gpsToMapPosition(gps){
   let weightedX = 0;
   let weightedY = 0;
   for(const point of ranked){
-    const weight = 1 / Math.max(point.distance, 1) ** 2; // Prevent near-zero distances from creating unstable weights.
+    const weight = 1 / Math.max(point.distance, 0.001) ** 2; // Prevent near-zero distances from creating unstable weights.
     totalWeight += weight;
     weightedX += point.targetX * weight;
     weightedY += point.targetY * weight;
@@ -551,19 +551,19 @@ function startTracking(){
         : error?.code === 2
           ? "The phone could not get a GPS fix."
           : "Live GPS timed out. Try again outside or with a stronger signal.";
-      stopTracking({preserveError:true});
+      stopTracking({keepErrorMessage:true, clearPosition:true});
     },
     {enableHighAccuracy:true, maximumAge:5000, timeout:15000}
   );
 }
 
-function stopTracking({preserveError=false} = {}){
+function stopTracking({keepErrorMessage=false, clearPosition=false} = {}){
   if(trackingState.watchId !== null && navigator.geolocation?.clearWatch) navigator.geolocation.clearWatch(trackingState.watchId);
   trackingState.watchId = null;
   trackingState.isStarting = false;
-  trackingState.current = preserveError ? null : trackingState.current;
+  if(clearPosition) trackingState.current = null;
   trackingState.hasCentered = false;
-  if(!preserveError) trackingState.lastError = "";
+  if(!keepErrorMessage) trackingState.lastError = "";
   const marker = $("liveLocationMarker");
   if(marker) marker.hidden = true;
   updateTrackingUi();
@@ -605,7 +605,7 @@ globalThis.addPhotos = async function(n){
     const fileEntries = await Promise.all(files.map(async file => ({file, metadata:await readPhotoMetadata(file)})));
     const firstEntryWithGps = fileEntries.find(({metadata}) => metadata.gps);
     let gpsToApply = firstEntryWithGps ? firstEntryWithGps.metadata.gps : null;
-    const needsDeviceGps = isLocationMissing && !gpsToApply && fileEntries.some(({metadata}) => !metadata.gps);
+    const needsDeviceGps = isLocationMissing && !gpsToApply && fileEntries.some(({metadata}) => !metadata.gps); // Fill missing coordinates from the device when at least one selected photo has no EXIF GPS.
     const fallbackGps = needsDeviceGps ? await getDeviceGps() : null;
 
     for(const {file, metadata} of fileEntries){
@@ -716,7 +716,7 @@ globalThis.selectCaisson = async function(n){
     <label class="label">Notes</label><textarea id="notes" rows="4">${esc(r.notes||"")}</textarea>
     <label class="label"><input id="verified" type="checkbox" ${r.verified?"checked":""} style="width:auto"> GPS/location verified</label>
     <button id="save">Save Caisson Information</button>
-    <p class="tracking-note">Live GPS can auto-fill a missing location when you add photos, and the blue position marker with its accuracy ring stays on the drawing while you move.</p>
+    <p class="tracking-note">Photo saves can still pull device GPS automatically, and the Start Live GPS button in the header turns on the blue position marker with its accuracy ring.</p>
   </div>
   <div class="card">
     <h2 style="font-size:17px">Photos</h2>
