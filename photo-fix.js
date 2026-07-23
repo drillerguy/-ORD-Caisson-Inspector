@@ -30,7 +30,7 @@ if (!document.getElementById(PHOTO_STYLE_ID)) {
 
 const DEFAULT_RECORD = {status:"No information",verified:false,notes:"",lat:null,lon:null,condition:"",updated:"",photos:[]};
 const pendingPhotoAdds = new Map();
-const TRACKING_ACCURACY_WARNING_METERS = 9;
+const TRACKING_ACCURACY_WARNING_METERS = 9; // Warn when GPS drift is about 30 ft, which can put the marker on the wrong caisson.
 const TRACKING_CONTROL_ID = "trackingBar";
 const EARTH_RADIUS_METERS = 6378137;
 
@@ -158,7 +158,7 @@ function createPhotoId(n){
     globalThis.crypto.getRandomValues(bytes);
     return `${n}-${Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("")}`;
   }
-  throw new Error("Unable to generate photo ID: this browser does not support the secure random features needed to save photos. Please use a current version of Safari, Chrome, Edge, or Firefox.");
+  throw new Error("Unable to generate photo ID: this browser does not support the required security features. Please update your browser.");
 }
 
 function exifDateToIso(value){
@@ -286,7 +286,7 @@ async function readPhotoMetadata(file){
       offset += 2 + size;
     }
   }catch(err){
-    console.warn("Unable to extract EXIF metadata from photo. The photo will still be saved, but image date/time and GPS metadata will not be available.", err);
+    console.warn("Unable to extract EXIF metadata from photo. The photo will still be saved, but automatic GPS coordinates and capture time will not be available.", err);
   }
   return {capturedAt:fallbackDate, gps:null};
 }
@@ -368,7 +368,7 @@ function gpsToMapPosition(gps){
   let weightedX = 0;
   let weightedY = 0;
   for(const point of ranked){
-    const weight = 1 / Math.max(point.distance, 1) ** 2;
+    const weight = 1 / Math.max(point.distance, 1) ** 2; // Keep very close control points from overwhelming the interpolation.
     totalWeight += weight;
     weightedX += point.targetX * weight;
     weightedY += point.targetY * weight;
@@ -421,7 +421,7 @@ function describeTrackingStatus(){
   if(trackingState.lastError) return {
     title:"Live GPS unavailable",
     detail:trackingState.lastError,
-    warning:"Allow Location Services and Safari location access on the iPhone."
+    warning:"Enable location permissions in your device settings and browser."
   };
   if(trackingState.watchId === null){
     return {
@@ -507,7 +507,7 @@ function syncTrackingOverlay(){
   if(map && accuracyRing && Number.isFinite(trackingState.current.accuracy)){
     const nearest = getNearestCaisson(trackingState.current);
     const distanceForOpacity = nearest?.distance ?? trackingState.current.accuracy;
-    const percentRadius = averageMetersPerPercent > 0 ? trackingState.current.accuracy / averageMetersPerPercent : 0.4;
+    const percentRadius = averageMetersPerPercent > 0 ? trackingState.current.accuracy / averageMetersPerPercent : 0.4; // Fall back to a small visible ring when scale cannot be estimated.
     accuracyRing.style.width = `${Math.max(18, map.offsetWidth * percentRadius / 100 * 2)}px`;
     accuracyRing.style.height = `${Math.max(18, map.offsetWidth * percentRadius / 100 * 2)}px`;
     accuracyRing.style.opacity = distanceForOpacity > TRACKING_ACCURACY_WARNING_METERS ? "0.85" : "1";
@@ -715,7 +715,7 @@ globalThis.selectCaisson = async function(n){
     <label class="label">Notes</label><textarea id="notes" rows="4">${esc(r.notes||"")}</textarea>
     <label class="label"><input id="verified" type="checkbox" ${r.verified?"checked":""} style="width:auto"> GPS/location verified</label>
     <button id="save">Save Caisson Information</button>
-    <p class="tracking-note">Live GPS can auto-fill a missing location when you add photos, and the blue position marker stays on the drawing while you move.</p>
+    <p class="tracking-note">Live GPS can auto-fill a missing location when you add photos, and the pulsing blue position marker stays on the drawing while you move.</p>
   </div>
   <div class="card">
     <h2 style="font-size:17px">Photos</h2>
