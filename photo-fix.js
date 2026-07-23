@@ -30,7 +30,7 @@ if (!document.getElementById(PHOTO_STYLE_ID)) {
 
 const DEFAULT_RECORD = {status:"No information",verified:false,notes:"",lat:null,lon:null,condition:"",updated:"",photos:[]};
 const pendingPhotoAdds = new Map();
-const TRACKING_ACCURACY_WARNING_METERS = 9; // Warn when GPS drift is approximately 30 ft, which can put the marker on the wrong caisson.
+const TRACKING_ACCURACY_WARNING_METERS = 9; // Warn when GPS drift is about 30 ft, which can put the marker on the wrong caisson.
 const FALLBACK_ACCURACY_RING_PERCENT = 0.4; // Keep the accuracy ring visible even when map scale cannot be estimated yet.
 const EXACT_MATCH_THRESHOLD_METERS = 0.01;
 const MIN_DISTANCE_FOR_WEIGHT = 0.001;
@@ -607,7 +607,8 @@ globalThis.addPhotos = async function(n){
     const fileEntries = await Promise.all(files.map(async file => ({file, metadata:await readPhotoMetadata(file)})));
     const firstEntryWithGps = fileEntries.find(({metadata}) => metadata.gps);
     let gpsToApply = firstEntryWithGps ? firstEntryWithGps.metadata.gps : null;
-    const needsDeviceGps = isLocationMissing && !gpsToApply && fileEntries.some(({metadata}) => !metadata.gps); // Fill missing coordinates from the device when at least one selected photo has no EXIF GPS.
+    const hasPhotoWithoutGps = fileEntries.some(({metadata}) => !metadata.gps);
+    const needsDeviceGps = isLocationMissing && !gpsToApply && hasPhotoWithoutGps;
     const fallbackGps = needsDeviceGps ? await getDeviceGps() : null;
 
     for(const {file, metadata} of fileEntries){
