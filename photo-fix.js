@@ -14,12 +14,12 @@ if (!document.getElementById(PHOTO_STYLE_ID)) {
 
 const DEFAULT_RECORD = {status:"No information",verified:false,notes:"",lat:null,lon:null,condition:"",updated:"",photos:[]};
 
-record = function(n){
+globalThis.record = function(n){
   const current = records[n];
   return current ? {...DEFAULT_RECORD, ...current, photos:[...(current.photos||[])]} : {...DEFAULT_RECORD};
 };
 
-saveRecords = function(){
+globalThis.saveRecords = function(){
   localStorage.setItem("ordCaissonRecords", JSON.stringify(records));
   renderPins();
 };
@@ -49,7 +49,7 @@ function describeMetadata(photo){
 function exifDateToIso(value){
   if(!value || typeof value !== "string") return null;
   const match = value.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
-  return match ? `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}` : value;
+  return match ? `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}` : null;
 }
 
 function rationalToNumber(entry){
@@ -170,7 +170,8 @@ async function readPhotoMetadata(file){
       if(marker === 0xFFDA || size < 2) break;
       offset += 2 + size;
     }
-  }catch(_err){
+  }catch(err){
+    console.warn("Unable to read photo metadata", err);
   }
   return {capturedAt:fallbackDate, gps:null};
 }
@@ -192,7 +193,7 @@ async function deletePhoto(n, id){
   if(selected === n) await selectCaisson(n);
 }
 
-addPhotos = async function(n){
+globalThis.addPhotos = async function(n){
   const input = $("photos");
   const files = input ? [...input.files] : [];
   if(!files.length) return;
@@ -203,7 +204,7 @@ addPhotos = async function(n){
   let gpsToApply = null;
 
   for(const file of files){
-    const id = `${n}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const id = `${n}-${crypto.randomUUID()}`;
     const metadata = await readPhotoMetadata(file);
     if(!gpsToApply && metadata.gps) gpsToApply = metadata.gps;
     store.put({
@@ -236,7 +237,7 @@ addPhotos = async function(n){
   if(selected === n) await selectCaisson(n);
 };
 
-showPhotos = async function(n){
+globalThis.showPhotos = async function(n){
   const grid = $("photoGrid");
   if(!grid) return;
   const ids = record(n).photos || [];
@@ -281,7 +282,7 @@ showPhotos = async function(n){
   }
 };
 
-selectCaisson = async function(n){
+globalThis.selectCaisson = async function(n){
   selected = n;
   renderPins();
   const r = record(n);
