@@ -1,1 +1,8 @@
-const C='ord-caisson-drawing-v1';const A=['./','./index.html','./manifest.webmanifest','./assets/caisson-plan.png'];self.addEventListener('install',e=>e.waitUntil(caches.open(C).then(c=>c.addAll(A))));self.addEventListener('fetch',e=>e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request))));
+const CACHE='ord-caisson-drawing-v2';
+const ASSETS=['./','./index.html','./manifest.webmanifest','./caisson-plan.png','./photo-fix.js'];
+self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting())));
+self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
+self.addEventListener('fetch',event=>{
+  if(event.request.method!=='GET') return;
+  event.respondWith(caches.match(event.request).then(cached=>cached||fetch(event.request)));
+});
