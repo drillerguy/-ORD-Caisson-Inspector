@@ -67,13 +67,14 @@ function loadRecords(){
    const current=stored[caisson];
    if(!current||typeof current!=="object"){merged[caisson]={...seed};return;}
    const hasStoredGps=Number.isFinite(current.lat)&&Number.isFinite(current.lon);
+   const shouldUseCurrentStatus=hasStoredGps||(current.status&&current.status!=="No information");
    merged[caisson]={
     ...seed,
     ...current,
     lat:hasStoredGps?current.lat:seed.lat,
     lon:hasStoredGps?current.lon:seed.lon,
     verified:hasStoredGps?current.verified:seed.verified,
-    status:hasStoredGps||(current.status&&current.status!=="No information")?current.status:seed.status,
+    status:shouldUseCurrentStatus?current.status:seed.status,
     notes:current.notes||seed.notes
    };
   });

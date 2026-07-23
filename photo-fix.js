@@ -371,7 +371,8 @@ function gpsToMapPosition(gps){
   let weightedX = 0;
   let weightedY = 0;
   for(const point of ranked){
-    const weight = 1 / (Math.max(point.distance, MIN_DISTANCE_FOR_WEIGHT) ** 2); // Prevent near-zero distances from creating unstable weights.
+    const stabilizedDistance = Math.max(point.distance, MIN_DISTANCE_FOR_WEIGHT);
+    const weight = 1 / (stabilizedDistance * stabilizedDistance);
     totalWeight += weight;
     weightedX += point.targetX * weight;
     weightedY += point.targetY * weight;
