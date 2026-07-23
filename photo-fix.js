@@ -13,7 +13,6 @@ if (!document.getElementById(PHOTO_STYLE_ID)) {
 }
 
 const DEFAULT_RECORD = {status:"No information",verified:false,notes:"",lat:null,lon:null,condition:"",updated:"",photos:[]};
-let photoIdCounter = Number(localStorage.getItem("ordCaissonPhotoCounter") || "0");
 const pendingPhotoAdds = new Map();
 
 globalThis.record = function(n){
@@ -242,17 +241,14 @@ globalThis.addPhotos = async function(n){
     const current = record(n);
     const needsLocationUpdate = current.lat === null || current.lon === null;
     current.photos = [...(current.photos || [])];
-    let gpsToApply = null;
-    let fallbackGps;
+    const fileEntries = await Promise.all(files.map(async file => ({file, metadata:await readPhotoMetadata(file)})));
+    let gpsToApply = fileEntries.find(({metadata}) => metadata.gps)?.metadata.gps || null;
+    const fallbackGps = !gpsToApply && needsLocationUpdate ? await getDeviceGps() : null;
 
-    for(const file of files){
+    for(const {file, metadata} of fileEntries){
       const generatedId = globalThis.crypto?.randomUUID?.();
-      const fallbackCounter = ++photoIdCounter;
-      localStorage.setItem("ordCaissonPhotoCounter", String(photoIdCounter));
-      const uniqueId = generatedId || `${Date.now()}-${fallbackCounter}`;
+      const uniqueId = generatedId || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       const id = `${n}-${uniqueId}`;
-      const metadata = await readPhotoMetadata(file);
-      if(fallbackGps === undefined && needsLocationUpdate && !metadata.gps) fallbackGps = await getDeviceGps();
       const effectiveGps = metadata.gps || fallbackGps || null;
       if(!gpsToApply && effectiveGps) gpsToApply = effectiveGps;
       store.put({
@@ -388,8 +384,6 @@ globalThis.selectCaisson = async function(n){
 
   $("photos").addEventListener("change", () => addPhotos(n));
   await showPhotos(n);
-
-
   const spot = HOTSPOTS.find(x=>x.caisson===n);
   if(spot){
     const shell = $("mapShell"), map = $("map");
