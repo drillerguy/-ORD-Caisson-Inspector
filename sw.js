@@ -1,1 +1,58 @@
-const C='ord-caisson-drawing-v1';const A=['./','./index.html','./manifest.webmanifest','./assets/caisson-plan.png'];self.addEventListener('install',e=>e.waitUntil(caches.open(C).then(c=>c.addAll(A))));self.addEventListener('fetch',e=>e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request))));
+const CACHE_VERSION = "v9";
+const CACHE = `ohare-caisson-drawing-${CACHE_VERSION}`;
+const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./caisson-plan.png", "./photo-fix.js", "./sw.js"];
+const NETWORK_FIRST_PATHS = new Set(["/", "/index.html", "/-ORD-Caisson-Inspector/", "/-ORD-Caisson-Inspector/index.html"]);
+const CACHE_FIRST_PATHS = new Set(["/manifest.webmanifest", "/caisson-plan.png", "/photo-fix.js", "/sw.js"]);
+
+self.addEventListener("install", event => {
+  event.waitUntil(
+    caches.open(CACHE)
+      .then(cache => cache.addAll(APP_SHELL))
+      .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener("activate", event => {
+  event.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key))))
+      .then(() => self.clients.claim())
+  );
+});
+
+async function networkFirst(request){
+  const cache = await caches.open(CACHE);
+  try{
+    const response = await fetch(request);
+    if(response.ok && request.method === "GET") cache.put(request, response.clone());
+    return response;
+  }catch{
+    const cached = await cache.match(request);
+    if(cached) return cached;
+    throw new Error("Network unavailable and no cached response found.");
+  }
+}
+
+async function cacheFirst(request){
+  const cache = await caches.open(CACHE);
+  const cached = await cache.match(request);
+  if(cached) return cached;
+  const response = await fetch(request);
+  if(response.ok && request.method === "GET") cache.put(request, response.clone());
+  return response;
+}
+
+self.addEventListener("fetch", event => {
+  if(event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
+  if(url.origin !== self.location.origin) return;
+  if(event.request.mode === "navigate" || NETWORK_FIRST_PATHS.has(url.pathname)){
+    event.respondWith(networkFirst(event.request));
+    return;
+  }
+  if(CACHE_FIRST_PATHS.has(url.pathname)){
+    event.respondWith(cacheFirst(event.request));
+    return;
+  }
+  event.respondWith(networkFirst(event.request));
+});
