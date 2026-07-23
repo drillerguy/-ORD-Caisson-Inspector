@@ -1,4 +1,5 @@
-const CACHE = "ord-caisson-drawing-v7";
+const CACHE_VERSION = "v7";
+const CACHE = `ord-caisson-drawing-${CACHE_VERSION}`;
 const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./caisson-plan.png", "./sw.js", "./photo-fix.js"];
 const NETWORK_FIRST_PATHS = new Set(["/", "/index.html", "/-ORD-Caisson-Inspector/", "/-ORD-Caisson-Inspector/index.html"]);
 const CACHE_FIRST_PATHS = new Set(["/caisson-plan.png", "/manifest.webmanifest", "/sw.js", "/photo-fix.js"]);

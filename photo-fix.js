@@ -36,13 +36,14 @@ if (!document.getElementById(PHOTO_STYLE_ID)) {
 
 const DEFAULT_RECORD = {status:"No information",verified:false,notes:"",lat:null,lon:null,gpsAccuracyMeters:null,gpsCapturedAt:null,condition:"",updated:"",photos:[]};
 const pendingPhotoAdds = new Map();
-const TRACKING_ACCURACY_WARNING_METERS = 9.144; // Warn when GPS drift is about 30 ft, which can put the marker on the wrong caisson.
+const TRACKING_ACCURACY_WARNING_METERS = 9.144; // Warn when GPS drift exceeds 30 ft (9.144m), which can put the marker on the wrong caisson.
 const FALLBACK_ACCURACY_RING_PERCENT = 0.4; // Keep the accuracy ring visible even when map scale cannot be estimated yet.
 const EXACT_MATCH_THRESHOLD_METERS = 0.01;
 const MIN_DISTANCE_FOR_WEIGHT = 0.001;
 const TRACKING_CONTROL_ID = "trackingBar";
 const EARTH_RADIUS_METERS = 6378137;
 const GPS_REPLACEMENT_EPSILON = 0.000001;
+const APP_VERSION = "1.3 — GPS and Photo Fix";
 
 const trackingState = {
   watchId:null,
@@ -171,8 +172,10 @@ function setGpsFields({lat=null, lon=null, gpsAccuracyMeters=null, gpsCapturedAt
   refreshGpsDetails();
 }
 
-function saveCaissonForm(n, overrides = {}){
+async function saveCaissonForm(n, overrides = {}){
+  await (pendingPhotoAdds.get(n) || Promise.resolve());
   const current = record(n);
+  const latestPhotos = [...new Set([...(current.photos || []), ...(records[n]?.photos || [])])];
   const formValues = readCurrentFormValues();
   records[n] = {
     ...current,
@@ -185,7 +188,7 @@ function saveCaissonForm(n, overrides = {}){
     notes:overrides.notes ?? formValues.notes,
     verified:Object.prototype.hasOwnProperty.call(overrides, "verified") ? overrides.verified : formValues.verified,
     updated:new Date().toISOString(),
-    photos:[...(current.photos || [])]
+    photos:latestPhotos
   };
   saveRecords();
   return records[n];
@@ -255,7 +258,7 @@ async function useCurrentGps(n){
     const gpsCapturedAt = new Date(position?.timestamp || Date.now()).toISOString();
     if(lat === null || lon === null) throw new Error("Location coordinates were missing from the GPS response.");
     setGpsFields({lat, lon, gpsAccuracyMeters, gpsCapturedAt, verified:true, force:true});
-    saveCaissonForm(n, {lat, lon, gpsAccuracyMeters, gpsCapturedAt, verified:true});
+    await saveCaissonForm(n, {lat, lon, gpsAccuracyMeters, gpsCapturedAt, verified:true});
     setGpsMessage(`GPS captured — accuracy ${formatFeet(gpsAccuracyMeters) || "unavailable"}`);
   }catch(error){
     const message = error?.code ? describeLocationError(error) : (error?.message || "Unable to retrieve your current GPS location. Please try again.");
@@ -930,7 +933,7 @@ globalThis.selectCaisson = async function(n){
     <label class="label"><input id="verified" type="checkbox" ${r.verified?"checked":""} style="width:auto"> GPS/location verified</label>
     <button id="save">Save Caisson Information</button>
     <p class="tracking-note">Photo saves can still pull device GPS automatically, and the Start Live GPS button at the top of the page turns on the blue position marker with its accuracy ring.</p>
-    <div class="version-label">Version 1.3 — GPS and Photo Fix</div>
+    <div class="version-label">Version ${APP_VERSION}</div>
   </div>
   <div class="card">
     <h2 style="font-size:17px">Photos</h2>
@@ -951,7 +954,7 @@ globalThis.selectCaisson = async function(n){
       alert(`Unable to complete photo addition: ${err?.message || "Unknown error"}. Please try adding the photo again.`);
       return;
     }
-    saveCaissonForm(n);
+    await saveCaissonForm(n);
     selectCaisson(n);
   };
 
